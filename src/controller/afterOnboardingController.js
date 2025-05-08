@@ -33,27 +33,28 @@ export const deviceDetails = async (req, res) => {
 
 export const pingDevice = async (req, res) => {
     try {
-        // var hosts = ['192.168.1.1', 'google.com', 'yahoo.com'];
-        // for(let host of hosts){
-        // let res = await ping.promise.probe(host);
         let { ip, device,dnacUrl } = req.body
-        if (!ip || !device) {
-            logger.error({ msg: "Unable to get ip from user", status: false })
-            return res.send({ msg: "Unable to get ip from user", status: false })
+        if (!ip || !device || !dnacUrl) {
+            logger.error({ msg: "Unable to get ip,device or dnac url ", status: false })
+            console.log({ msg: "Unable to get ip,device or dnac url ", status: false })
+            return res.send({ msg: "Unable to get ip,device or dnac url ", status: false })
         }
         let finalOutput = await dnacResponse(dnacUrl,device,ip)
-        console.log("finalOutput",finalOutput)
-        // let result = await ping.promise.probe(ip);
-        // let msg = result?.alive
-        // if (msg) {
-        //     let resultMsg = { msg: "Gateway reachable from the current management IP", status: true }
-        //     logger.info(resultMsg)
-        //     return res.send(resultMsg)
-        // } else {
-        //     let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: false }
-        //     logger.error(resultMsg)
-        //     return res.send(resultMsg)
-        // }
+        if(Object.keys(finalOutput).length==0 || !finalOutput.status){
+            logger.error(finalOutput)
+            return res.send(finalOutput)
+        }
+        let pingStatus = finalOutput?.data?.includes("Success rate is 100 percent (5/5)")
+        console.log("pingStatus", pingStatus)
+        if (pingStatus) {
+            let resultMsg = { msg: "Gateway reachable from the current management IP", status: true }
+            logger.info(resultMsg)
+            return res.send(resultMsg)
+        } else {
+            let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: false }
+            logger.info(resultMsg)
+            return res.send(resultMsg)
+        }
 
     } catch (err) {
         let resultMsg = { msg: `Error in pingDevice:${err}`, status: false }

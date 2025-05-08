@@ -141,8 +141,9 @@ export const commonCredentials = async (ip, dnacUrl = "") => {
     }
 };
 
-export const fileIDResponse = async (dnacUrl, token, taskOutput) => {
+export const fileIDResponse = async (dnacUrl,device, taskOutput) => {
     try {
+        let { token} = await commonCredentials(device, dnacUrl)
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
         });
@@ -157,19 +158,24 @@ export const fileIDResponse = async (dnacUrl, token, taskOutput) => {
             httpsAgent: httpsAgent
         };
         const response = await axios.request(config);
-        if (!response || response.data.length == 0 || Object.keys(response.data[0].commandResponses).length == 0 || Object.keys(response.data[0].commandResponses.SUCCESS).length == 0) {
-            return {data:"", msg: "Unable to get file id", status: false }
+        if (Object.keys(response).length==0 || response.data.length == 0 || Object.keys(response.data[0].commandResponses).length == 0 || Object.keys(response.data[0].commandResponses.SUCCESS).length == 0) {
+            return { data: "", msg: "Unable to get file id", status: false }
         }
         let output = response.data[0].commandResponses.SUCCESS
-        console.log(output)
-        return {data:output,msg: "data get successfully", status: true }
+        let result = ""
+        for (let item in output) {
+            result = output[item]
+        }
+        return { data: result, msg: "data get successfully", status: true }
     } catch (err) {
         console.log("error in fileIDResponse", err)
-        return {data:"",msg: `Error msg in fileIDResponse:${err}`, status: false }}
-    };
+        return { data: "", msg: `Error msg in fileIDResponse:${err}`, status: false }
+    }
+};
 
-export const taskResponse = async (dnacUrl, token, taskUrl) => {
+export const taskResponse = async (dnacUrl, device, taskUrl) => {
     try {
+        let { token} = await commonCredentials(device, dnacUrl)
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
         });
@@ -184,7 +190,7 @@ export const taskResponse = async (dnacUrl, token, taskUrl) => {
             httpsAgent: httpsAgent
         };
         const response = await axios.request(config);
-        if (!response || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.progress == "") {
+        if (Object.keys(response).length==0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.progress == "") {
             return { fileId: "", msg: "Unable to get file id", status: false }
         }
         let { fileId } = JSON.parse(response.data.response.progress)
@@ -221,29 +227,26 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
 
 
         const response = await axios.request(config);
-        if (!response || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.url == "") {
-            logger.error({ msg: "Unable to get task url", status: false })
+        if (Object.keys(response).length==0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.url == "") {
             return { msg: "Unable to get task url", status: false }
         }
         let taskUrl = response.data.response.url
-        let taskOutput = await taskResponse(dnacUrl, token, taskUrl)
-        if (!taskOutput || Object.keys(taskOutput).length == 0 || taskOutput.status == false) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        let taskOutput = await taskResponse(dnacUrl,device, taskUrl)
+        if (Object.keys(taskOutput)==0 || Object.keys(taskOutput).length == 0 || taskOutput.status == false) {
             // logger.error(taskOutput)
             return taskOutput
         }
-        let fileOutput = await fileIDResponse(dnacUrl, token, taskOutput?.fileId)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        let fileOutput = await fileIDResponse(dnacUrl,device, taskOutput?.fileId)
         if (fileOutput.status == false) {
             // logger.error(fileOutput)
             return fileOutput
         }
-        console.log("fileOutput", fileOutput)
-
-
-
-
+        return fileOutput
     } catch (err) {
-        logger.error()
-        console.log("error", err)
+        let msgOutput={data:"",msg:`Error in dnacResponse:${err},status:false`}
+       return msgOutput
     }
 }
 

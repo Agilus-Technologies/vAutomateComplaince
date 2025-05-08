@@ -207,7 +207,7 @@ export const execute_templates = async (template_id, item) => {
         } else {
             let temp_deploy_status_urls = temp_deploy_status_url + deployment_ids
             console.log("deployment_idssdfgh", deployment_ids)
-            await new Promise(resolve => setTimeout(resolve, 20000));
+            await new Promise(resolve => setTimeout(resolve, 10000));
             let secondConfig = {
                 method: 'get',
                 maxBodyLength: Infinity,
