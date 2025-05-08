@@ -27,31 +27,29 @@ export const deviceDetails = async (req, res) => {
     }
 };
 
-
-
-
-
 export const pingDevice = async (req, res) => {
     try {
-        let { ip, device,dnacUrl } = req.body
+        let { ip, device, dnacUrl } = req.body
         if (!ip || !device || !dnacUrl) {
             logger.error({ msg: "Unable to get ip,device or dnac url ", status: false })
             console.log({ msg: "Unable to get ip,device or dnac url ", status: false })
             return res.send({ msg: "Unable to get ip,device or dnac url ", status: false })
         }
-        let finalOutput = await dnacResponse(dnacUrl,device,ip)
-        if(Object.keys(finalOutput).length==0 || !finalOutput.status){
+        let finalOutput = await dnacResponse(dnacUrl, device, ip)
+        if (Object.keys(finalOutput).length == 0 || !finalOutput.status) {
             logger.error(finalOutput)
+            console.log(finalOutput)
             return res.send(finalOutput)
         }
         let pingStatus = finalOutput?.data?.includes("Success rate is 100 percent (5/5)")
-        console.log("pingStatus", pingStatus)
         if (pingStatus) {
             let resultMsg = { msg: "Gateway reachable from the current management IP", status: true }
+            console.log(resultMsg)
             logger.info(resultMsg)
             return res.send(resultMsg)
         } else {
-            let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: false }
+            let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: true }
+            console.log(resultMsg)
             logger.info(resultMsg)
             return res.send(resultMsg)
         }
@@ -60,6 +58,16 @@ export const pingDevice = async (req, res) => {
         let resultMsg = { msg: `Error in pingDevice:${err}`, status: false }
         logger.error(resultMsg)
         return res.send(resultMsg)
+    }
+
+};
+
+
+export const configurationDetails = async (req, res) => {
+    try {
+        console.log("data", req.body)
+    } catch (err) {
+        console.log(`Error in configuration:${err}`)
     }
 
 }

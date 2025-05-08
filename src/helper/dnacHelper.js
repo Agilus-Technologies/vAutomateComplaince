@@ -189,8 +189,9 @@ export const taskResponse = async (dnacUrl, device, taskUrl) => {
             },
             httpsAgent: httpsAgent
         };
+        await new Promise(resolve => setTimeout(resolve, 2000));
         const response = await axios.request(config);
-        if (Object.keys(response).length==0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.progress == "") {
+        if (Object.keys(response).length==0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.progress == "" || response.data.response.progress == 'CLI Runner request creation') {
             return { fileId: "", msg: "Unable to get file id", status: false }
         }
         let { fileId } = JSON.parse(response.data.response.progress)
@@ -231,14 +232,14 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
             return { msg: "Unable to get task url", status: false }
         }
         let taskUrl = response.data.response.url
-        await new Promise(resolve => setTimeout(resolve, 2000));
         let taskOutput = await taskResponse(dnacUrl,device, taskUrl)
+        await new Promise(resolve => setTimeout(resolve, 5000));
         if (Object.keys(taskOutput)==0 || Object.keys(taskOutput).length == 0 || taskOutput.status == false) {
             // logger.error(taskOutput)
             return taskOutput
         }
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        let fileOutput = await fileIDResponse(dnacUrl,device, taskOutput?.fileId)
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        let fileOutput = await fileIDResponse(dnacUrl,device,taskOutput?.fileId)
         if (fileOutput.status == false) {
             // logger.error(fileOutput)
             return fileOutput
