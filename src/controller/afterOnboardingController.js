@@ -8,7 +8,7 @@ import { dnacResponse } from '../helper/dnacHelper.js';
 export const deviceDetails = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-        let setUpDetails = await db_connect.collection('ms_device').find({}).toArray();
+        let setUpDetails = await db_connect.collection('ms_device').find({ "source": "DNAC" }).toArray();
         if (!setUpDetails || setUpDetails?.length == 0) {
             let errorMsg = { data: [], msg: "Unable to get dnac data.", status: false }
             logger.error(errorMsg)
@@ -36,7 +36,8 @@ export const pingDevice = async (req, res) => {
             return res.send({ msg: "Unable to get ip,device or dnac url ", status: false })
         }
         let finalOutput = await dnacResponse(dnacUrl, device, ip)
-        if (Object.keys(finalOutput).length == 0 || !finalOutput.status) {
+        if (!finalOutput.status) {
+            // if (Object.keys(finalOutput).length == 0 || !finalOutput.status) {
             logger.error(finalOutput)
             console.log(finalOutput)
             return res.send(finalOutput)
@@ -61,13 +62,36 @@ export const pingDevice = async (req, res) => {
     }
 
 };
+const config={
+ voice:`interface GigabitEthernet1/0/8\nswitchport access vlan 122\nswitchport mode access\nswitchport voice vlan 180\nno shutdown`,
+ data:`interface gigabitEthernet 1/0/5\ndescription "X"/nswitchport mode trunk\nswitchport trunk allowed vlan 123\nno shutdown`
+}
+
 
 
 export const configurationDetails = async (req, res) => {
     try {
         console.log("data", req.body)
+        let data = req.body
+        if (!data || Object.keys(data).length == 0 || data.interfaceLevel.length == 0) {
+            return res.send({ msg: "Unable to get data from user.", status: false })
+        }
+        const { interfaceLevel } = data;
+       let output = interfaceLevel.map((item)=>{
+            return item
+        })
+        console.log(output,"conf")
+        // interfaceLevel.forEach((item) => {
+        //     console.log(item)
+        // })
+
+        return res.send({ msg: "Data get successfully", status: true })
+
     } catch (err) {
         console.log(`Error in configuration:${err}`)
+        logger.error({ msg: `Error in configurationDetails:${err}`, status: false })
+        let msgError = { msg: `Error in configurationDetails:${err.message}`, status: false }
+        return res.send(msgError)
     }
 
 }

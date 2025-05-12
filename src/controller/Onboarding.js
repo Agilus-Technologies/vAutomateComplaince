@@ -493,28 +493,6 @@ export const getTemplate = async (dnacUrl) => {
     }
 };
 
-// function findBestMatch(targetValue, data, field = 'displayVersion', threshold = 0.95) {
-//     let bestMatch = null;
-//     let highestSimilarity = 0;
-
-//     data.forEach(item => {
-//         const valueToCompare = item[field];
-//         const similarityScore = similarity.compareTwoStrings(targetValue, valueToCompare);
-
-//         // Check if the similarity score is higher than the current highest
-//         if (similarityScore > highestSimilarity && similarityScore >= threshold) {
-//             highestSimilarity = similarityScore;
-//             bestMatch = {
-//                 name: item.name,
-//                 displayVersion: item.displayVersion,
-//                 similarityScore: similarityScore
-//             };
-//         }
-//     });
-
-//     return bestMatch;
-// }
-
 function findBestMatch(response, targetDisplayVersion) {
     // Find the item with the highest similarity score for displayVersion
     let bestMatch = null;
@@ -570,15 +548,6 @@ export const pnpSiteClaim = async (data, dnac) => {
 export const saveClaimSiteData = async (req, res) => {
     try {
         const payload = req.body;
-
-        
-        // const { deviceId, siteId, imageInfo, configInfo } = payload;
-        // if (!deviceId || !siteId || !imageInfo || !configInfo) {
-        //     return res.status(400).json({
-        //         msg: "Missing required fields (deviceId, siteId, imageInfo, configInfo)",
-        //         status: false,
-        //     });
-        // }
         for (let key in payload) {
             if (payload[key] == null || payload[key] == "")
                 return res.send({ msg: `Please provide ${key} value`, status: false });
@@ -597,17 +566,7 @@ export const saveClaimSiteData = async (req, res) => {
         let getimageID = await getImageID(payload.dnacUrl)
         let parseData = JSON.parse(getimageID)
         let isTaggedGoldenFilterData = parseData.response.filter((item) => item.isTaggedGolden === true)
-        // const targetDisplayVersion = payload?.goldenImage; // target version to search for
-        // const bestMatch = findBestMatch(targetVersion, isTaggedGoldenFilterData, 'displayVersion', 0.95);
 
-        // Display the best match
-        // const bestMatch = findBestMatch(isTaggedGoldenFilterData, targetDisplayVersion);
-
-        // Display the result
-        // if (!bestMatch || Object.keys(bestMatch).length == 0) {
-        //     console.log("No matching item found.");
-        //     return res.json({ msg: "No matching item found for golden image id", status: false })
-        // }
         const desiredVersion = payload?.goldenImage;
         function normalizeVersion(ver) {
             if (typeof ver !== 'string') return null;
@@ -683,7 +642,7 @@ export const saveClaimSiteData = async (req, res) => {
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
 
-        //site-claim api
+          //site-claim api
         // let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
 
 

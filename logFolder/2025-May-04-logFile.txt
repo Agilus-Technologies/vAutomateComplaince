@@ -1,6 +1,0 @@
-[info] 04-05-2025 18:52:52:POST /api/v1/onboard/claimSite 200 47 - 308370.491 ms
-[info] 04-05-2025 18:52:52:POST /api/v1/onboard/claimSite 200 47 - 308370.491 ms
-[info] 04-05-2025 18:54:42:POST /api/v1/onboard/claimSite 200 65 - 19143.638 ms
-[info] 04-05-2025 18:54:42:POST /api/v1/onboard/claimSite 200 65 - 19143.638 ms
-[info] 04-05-2025 19:16:35:POST /api/v1/onboard/getUnClaimedDevice 200 7121 - 482.142 ms
-[info] 04-05-2025 19:16:35:POST /api/v1/onboard/getUnClaimedDevice 200 7121 - 482.142 ms
