@@ -16,7 +16,8 @@ export const db_config = async (req, res) => {
 
     }
 
-}
+};
+
 export const getDnacToken = async (dnacCredentialsData) => {
     try {
         let hostName = dnacCredentialsData?.ip?.split("/");
@@ -92,21 +93,22 @@ export const getDnacToken = async (dnacCredentialsData) => {
 export const commonCredentials = async (ip, dnacUrl = "") => {
     try {
         let db_connect = dbo && dbo.getDb()
-        let config = await db_config();
-
-        // let setUpDetails = await setUPModel.findOne({}).lean();
-        // let dnacUrlss = await inventoryModel.find({ $and: [{ source: "dnac" }, { IP: ip }] });        
-        // let dnacUrls = dnacUrl === "" ? dnacUrlss[0]._doc.source_url : dnacUrl 
-        // let dnacUrls = dnacUrl === "" ? dnacUrlss[0].source_url : dnacUrl 
+        // let config = await db_config();
         let setUpDetails = await db_connect.collection('tbl_Package').find({}).project({ "dnac": 1, "_id": 0 }).toArray();
-        let deviceUUId = await db_connect.collection('ms_device').find({ $and: [{ source: "DNAC" }, { managementIpAddress: ip }, { "source_url": dnacUrl }] }).toArray();
+        let deviceUUId = await db_connect.collection('ms_device').find({ $and: [{ source: "DNAC" }, { managementIpAddress: ip }, { "source_url": dnacUrl }]}).toArray();
         let switchUUID = deviceUUId[0]?.device_id
-        const { AUTH_API_URL, template_id } = config && config[0]?.dnac
+        // const { AUTH_API_URL, template_id } = config && config[0]?.dnac
+        let AUTH_API_URL="/dna/system/api/v1/auth/token"
+        let template_id="48967f32-a1de-46a0-a407-84164b8"
         let dnacDetailss = setUpDetails[0]?.dnac.filter((item) => item?.DnacURL === dnacUrl)
-        let cli_command_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.cli_command_read_request;
-        let deploy_temp_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.DEPLOY_TEMPLATE_URL;
-        let temp_deploy_status_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.TEMPLATE_STATUS;
-        let interfaceAPi = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.interfaceEndPoint + switchUUID;
+        let cli_command_url = `${dnacDetailss[0]?.DnacURL}/api/v1/network-device-poller/cli/read-request`;
+        // let cli_command_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.cli_command_read_request;
+        // let deploy_temp_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.DEPLOY_TEMPLATE_URL;
+        // let temp_deploy_status_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.TEMPLATE_STATUS;
+        let deploy_temp_url = `${dnacDetailss[0]?.DnacURL}/dna/intent/api/v1/template-programmer/template/deploy`;
+        let temp_deploy_status_url = `${dnacDetailss[0]?.DnacURL}/dna/intent/api/v1/template-programmer/template/deploy/status/`;
+        let interfaceAPi = `${dnacDetailss[0]?.DnacURL}/dna/intent/api/v1/interface/network-device/`;
+        // let interfaceAPi = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.interfaceEndPoint + switchUUID;
         // console.log("cli_command_url",cli_command_url)
         let dnacCredentials = {
             authUrl: AUTH_API_URL,
@@ -250,5 +252,96 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
         return msgOutput
     }
 }
+
+export const execute_templates = async (item) => {
+    try {
+        let template_id = "48967f32-a1de-46a0-a407-84197a6064b8"
+        let credData = await commonCredentials(item.device, item.dnac);
+        const { token, deploy_temp_url, temp_deploy_status_url, switchUUID, dnacCredentials } = credData;
+
+        const httpsAgent = new https.Agent({
+            rejectUnauthorized: false
+        });
+
+        let data = {
+            "templateId": template_id,
+            "targetInfo": [
+                {
+                    "id": item.device, // Ensure this device ID is correct
+                    "type": "MANAGED_DEVICE_IP",
+                    "params": {
+                        "param": item.config
+                    }
+                }
+            ]
+        };
+
+        let config = {
+            method: 'post',
+            maxBodyLength: Infinity,
+            url: `${item.dnac}/dna/intent/api/v1/template-programmer/template/deploy`,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            data: data,
+            httpsAgent: httpsAgent
+        };
+
+        // Log the request data to verify
+        // console.log("Request Payload:", JSON.stringify(data, null, 2));
+
+        // Send the POST request
+        const response = await axios.request(config);
+        // console.log("Response Status:", response.status);
+        // console.log("Response Data:", JSON.stringify(response.data, null, 2));
+        let deploymentIdsss = JSON.stringify(response.data, null, 2)
+        deploymentIdsss = JSON.parse(deploymentIdsss)
+        const deployment_ids = deploymentIdsss.deploymentId.split(":").pop().trim()
+        if (deployment_ids == "None of the targets are applicable for the template. Hence not deploying") {
+            console.log("None of the targets are applicable for the template. Hence not deploying")
+            return { msg: "None of the targets are applicable for the template. Hence not deploying", status: false }
+        } else {
+            let temp_deploy_status_urls = temp_deploy_status_url + deployment_ids
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            let secondConfig = {
+                method: 'get',
+                maxBodyLength: Infinity,
+                url: temp_deploy_status_urls,
+                headers: {
+                    'x-auth-token': token,
+                    'Content-Type': 'application/json'
+                },
+                httpsAgent: httpsAgent
+            };
+            let deployStatus = ""
+            let excuteRes = false
+            setTimeout(() => {
+                excuteRes = true;
+            }, 40000);
+            while ((deployStatus !== "SUCCESS" || deployStatus !== "FAILURE") && excuteRes === false) {
+                // let headers = { "x-auth-token": token };
+                const responses = await axios.request(secondConfig);
+                deployStatus = responses.data.devices[0].status
+                if (deployStatus === "SUCCESS" || deployStatus === "FAILURE") {
+                    excuteRes = true
+                }
+            }
+            // await new Promise(resolve => setTimeout(resolve, 5000));
+            return deployStatus
+        }
+
+        if (response.status !== 200) {
+            console.log("Error: Request failed with status", response.status);
+            return {msg:`Request failed with status ${response.status}`,status:false};
+        }
+        const deployment_id = response.data.deploymentId;
+        return deployment_id;
+
+    } catch (error) {
+         console.log("Error: Request failed with status", response.status);
+        return {msg:`Error in excute_template ${error.message}`,status:false};
+    }
+};
 
 

@@ -36,27 +36,6 @@ object-assign
  */
 
 /*!
- * Connect - session - Cookie
- * Copyright(c) 2010 Sencha Inc.
- * Copyright(c) 2011 TJ Holowaychuk
- * MIT Licensed
- */
-
-/*!
- * Connect - session - Session
- * Copyright(c) 2010 Sencha Inc.
- * Copyright(c) 2011 TJ Holowaychuk
- * MIT Licensed
- */
-
-/*!
- * Connect - session - Store
- * Copyright(c) 2010 Sencha Inc.
- * Copyright(c) 2011 TJ Holowaychuk
- * MIT Licensed
- */
-
-/*!
  * Connection states
  */
 
@@ -193,10 +172,6 @@ object-assign
 
 /*!
  * Populates `docs`
- */
-
-/*!
- * Prototype.
  */
 
 /*!
@@ -348,22 +323,6 @@ object-assign
  */
 
 /*!
- * express-session
- * Copyright(c) 2010 Sencha Inc.
- * Copyright(c) 2011 TJ Holowaychuk
- * Copyright(c) 2014-2015 Douglas Christopher Wilson
- * MIT Licensed
- */
-
-/*!
- * express-session
- * Copyright(c) 2010 Sencha Inc.
- * Copyright(c) 2011 TJ Holowaychuk
- * Copyright(c) 2015 Douglas Christopher Wilson
- * MIT Licensed
- */
-
-/*!
  * finalhandler
  * Copyright(c) 2014-2022 Douglas Christopher Wilson
  * MIT Licensed
@@ -489,12 +448,6 @@ object-assign
  */
 
 /*!
- * random-bytes
- * Copyright(c) 2016 Douglas Christopher Wilson
- * MIT Licensed
- */
-
-/*!
  * range-parser
  * Copyright(c) 2012-2014 TJ Holowaychuk
  * Copyright(c) 2015-2016 Douglas Christopher Wilson
@@ -540,13 +493,6 @@ object-assign
  * type-is
  * Copyright(c) 2014 Jonathan Ong
  * Copyright(c) 2014-2015 Douglas Christopher Wilson
- * MIT Licensed
- */
-
-/*!
- * uid-safe
- * Copyright(c) 2014 Jonathan Ong
- * Copyright(c) 2015-2017 Douglas Christopher Wilson
  * MIT Licensed
  */
 

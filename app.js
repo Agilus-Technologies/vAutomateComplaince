@@ -1,19 +1,20 @@
+// NODE_TLS_REJECT_UNAUTHORIZED = '0';
 import express from "express";
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
+// import dotenv from 'dotenv';
 import fs from "fs";
 import https from "https";
 import onboardingRoute from "./src/route/onboarding_routes.js";
 import afterOnboading from "./src/route/afterOnboarding_routes.js"
 import cors from 'cors';
 import morgan from 'morgan';
-import session from 'express-session';
-import fileUpload from "express-fileupload";
+// import session from 'express-session';
+// import fileUpload from "express-fileupload";
 import rateLimit from 'express-rate-limit';
 import logger from "./logger.js";
 import dbo from "./src/db/conn.js";
 
-dotenv.config();
+// dotenv.config();
 
 const app = express();
 const port =  3001;
@@ -30,6 +31,11 @@ app.use(express.json())
 app.use(express.static('./public'));
 app.use(cors());
 
+app.use((err, req, res, next) => {
+    logger.error(err.stack)
+    console.error(err.stack);
+    return res.status(500).send('Something went wrong!');
+  });
 // Rate limiting
 const limiter = rateLimit({
     windowMs: 3 * 60 * 1000, // 3 minutes
@@ -40,18 +46,18 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // File upload configuration
-app.use(fileUpload({
-    useTempFiles: true,
-    tempFileDir: '/tmp/'
-}));
+// app.use(fileUpload({
+//     useTempFiles: true,
+//     tempFileDir: '/tmp/'
+// }));
 
 // Session configuration
-app.use(session({
-    secret: 'SECRET_KEY',
-    resave: false,
-    saveUninitialized: true,
-    cookie: { maxAge: 60000 },
-}));
+// app.use(session({
+//     secret: 'SECRET_KEY',
+//     resave: false,
+//     saveUninitialized: true,
+//     cookie: { maxAge: 60000 },
+// }));
 
 // Logging configuration with Morgan
 morgan.token('statusCode', (req, res) => res.statusCode);
@@ -92,7 +98,7 @@ const startServer = async() => {
     await dbo?.connectToServer("", "", function (err) {
         if (err) console.error("error in db", err);
     });
-    server.listen(port, () => {
+    server.listen(port,"0.0.0.0" ,() => {
         console.log(`HTTPS server running on ${port}`);
     });
 };

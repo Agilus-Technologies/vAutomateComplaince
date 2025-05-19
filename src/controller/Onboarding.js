@@ -4,13 +4,15 @@ import https from "https";
 import logger from '../../logger.js';
 // import onboardingModel from "../../model/onboardingModel.js"
 import dbo from "../db/conn.js";
-import { commonCredentials } from '../helper/dnacHelper.js';
+import { commonCredentials,execute_templates } from '../helper/dnacHelper.js';
 // import setUPModel from '../../model/setup_model.js';
 // import inventoryModel from '../../model/inventoryModel.js';
 import axios from "axios";
 import onboardingModel from '../model/onboardingModel.js';
 // import similarity from 'string-similarity';
 import semver from 'semver';
+
+
 
 export const allDnacDetails = async (req, res) => {
     try {
@@ -80,7 +82,6 @@ export const onboardDeviceDetails = async (req, res) => {
             logger.error(errorMsg)
             return res.send(errorMsg)
         }
-
         logger.info({ msg: "Data get successfully", status: true })
         return res.json({ data: dnacUrlss, msg: "Data get successfully", status: true })
     } catch (err) {
@@ -158,95 +159,7 @@ export const dnacDeviceInterfaces = async (req, res) => {
     }
 };
 
-export const execute_templates = async (template_id, item) => {
-    try {
-        let credData = await commonCredentials(item.device, item.dnac);
-        const { token, deploy_temp_url, temp_deploy_status_url, switchUUID, dnacCredentials } = credData;
 
-        const httpsAgent = new https.Agent({
-            rejectUnauthorized: false
-        });
-
-        let data = {
-            "templateId": template_id,
-            "targetInfo": [
-                {
-                    "id": item.device, // Ensure this device ID is correct
-                    "type": "MANAGED_DEVICE_IP",
-                    "params": {
-                        "param": item.config
-                    }
-                }
-            ]
-        };
-
-        let config = {
-            method: 'post',
-            maxBodyLength: Infinity,
-            url: `${item.dnac}/dna/intent/api/v1/template-programmer/template/deploy`,
-            headers: {
-                'x-auth-token': token,
-                'Content-Type': 'application/json'
-            },
-            data: data,
-            httpsAgent: httpsAgent
-        };
-
-        // Log the request data to verify
-        // console.log("Request Payload:", JSON.stringify(data, null, 2));
-
-        // Send the POST request
-        const response = await axios.request(config);
-        // console.log("Response Status:", response.status);
-        // console.log("Response Data:", JSON.stringify(response.data, null, 2));
-        let deploymentIdsss = JSON.stringify(response.data, null, 2)
-        deploymentIdsss = JSON.parse(deploymentIdsss)
-        const deployment_ids = deploymentIdsss.deploymentId.split(":").pop().trim()
-        if (deployment_ids == "None of the targets are applicable for the template. Hence not deploying") {
-            console.log("None of the targets are applicable for the template. Hence not deploying")
-        } else {
-            let temp_deploy_status_urls = temp_deploy_status_url + deployment_ids
-            console.log("deployment_idssdfgh", deployment_ids)
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            let secondConfig = {
-                method: 'get',
-                maxBodyLength: Infinity,
-                url: temp_deploy_status_urls,
-                headers: {
-                    'x-auth-token': token,
-                    'Content-Type': 'application/json'
-                },
-                httpsAgent: httpsAgent
-            };
-            let deployStatus = ""
-            let excuteRes = false
-            setTimeout(() => {
-                excuteRes = true;
-            }, 40000);
-            while ((deployStatus !== "SUCCESS" || deployStatus !== "FAILURE") && excuteRes === false) {
-                // let headers = { "x-auth-token": token };
-                const responses = await axios.request(secondConfig);
-                deployStatus = responses.data.devices[0].status
-                if (deployStatus === "SUCCESS" || deployStatus === "FAILURE") {
-                    excuteRes = true
-                }
-            }
-            // await new Promise(resolve => setTimeout(resolve, 5000));
-            console.log("deployStatus", deployStatus)
-            return deployStatus
-        }
-
-        if (response.status !== 200) {
-            console.log("Error: Request failed with status", response.status);
-            return;
-        }
-        const deployment_id = response.data.deploymentId;
-        return deployment_id;
-
-    } catch (error) {
-        console.error("Error:", error);
-    }
-};
 
 const configuration = (datass) => {
     if (datass.dayOnboardingMethod.includes("Access Switch")) {
@@ -282,8 +195,9 @@ export const configDevicesInDnac = async (req, res) => {
         datass["createdAt"] = new Date()
         datass["updatedAt"] = new Date()
         let saveData = await db_connect.collection("onboardingdata").insertOne(datass)
-        let template_id = "48967f32-a1de-46a0-a407-84197a6064b8"
-        let excute_templte = await execute_templates(template_id, datass)
+      
+        let excute_templte = await execute_templates(datass)
+        // let excute_templte = await execute_templates(datass)
         let msgs = {};
         if (excute_templte == "SUCCESS") {
             msgs = { msg: "Device configured successfully.", status: true }
@@ -642,7 +556,7 @@ export const saveClaimSiteData = async (req, res) => {
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
 
-          //site-claim api
+        //site-claim api
         // let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
 
 
@@ -740,6 +654,67 @@ export const postPnPDeviceSiteClaim = async (req, res) => {
         });
     }
 };
+
+
+
+
+export const sendMailForScreenShot = async (req, res) => {
+    try {
+        const data=req.body
+        const dat1=req.files
+        console.log(data,"data")
+        console.log(dat1,"dat1")
+        setImmediate(async () => {
+            try {
+                // Email to User
+                const userSubject = `Link to Download ${downloadFor}`;
+                const userHtml = `
+                    <html>
+                    <head>
+                        <style>
+                            body { font-family: 'Verdana', sans-serif; background-color: #f4f4f4; color: #333; }
+                            .email-container { background-color: #fff; border: 1px solid #cccccc; padding: 20px; margin: 20px auto; width: 650px; }
+                            .header { text-align: center; }
+                            .header img { width: 650px; height: 100px; }
+                            .content { font-size: 14px; color: #333; line-height: 1.6; }
+                            .footer { text-align: center; font-size: 12px; color: #888; margin-top: 20px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="email-container">
+                            <div class="header">
+                                <img src="http://files.velocis.in/mailer/vAutomate/vAutomateEmailBanner.png" alt="Agilus">
+                            </div>
+                            <div class="content">
+                                <p>Dear ${name},</p>
+                                <p>Greetings of the day!</p>
+                                <p>Thank you for your interest in ${downloadFor}. 
+                                <a href="#" onclick="checkMail(true)" target="_blank">Click here</a> to download.
+                                </p>
+                                <p>Best regards,</p>
+                                <p>Team Agilus</p>
+                                <img src='https://www.agilustech.in/static/media/Agilus---Logo.f0cf7ef4cd7edadacb62.png' alt="Agilus Logo" style="height: 30px;">
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                `;
+                await sendEmail({ to: mail, subject: userSubject, data: { name, html: userHtml } });
+
+            } catch (error) {
+                console.error('Error sending email:', error);
+            }
+        });
+
+    } catch (err) {
+        let errorMsg = { msg: `Error in send mail:${err.message}`, status: false }
+        logger.error(errorMsg)
+        console.log({ msg: `Error in send mail:${err}`, status: false })
+        return res.send(errorMsg)
+
+    }
+
+}
 
 
 // export const onboardDeviceDetails = async (req, res) => {

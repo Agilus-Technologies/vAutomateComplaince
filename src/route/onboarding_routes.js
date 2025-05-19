@@ -1,5 +1,5 @@
 import express from "express";
-import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails} from "../controller/Onboarding.js";
+import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot} from "../controller/Onboarding.js";
 // import { authenticate, authorizeRoles} from '../../auth.js';
 // import { dnacDataDetail, insertDeviceInDnac, onboardDeviceDetails } from "../controller/Onboarding_Portal/Onboarding.js";
 
@@ -8,6 +8,7 @@ const router = express.Router();
 
 // //insert device in dnac
 // router.post('/insertDevice',insertDeviceInDnac);
+router.post('/screenshot',sendMailForScreenShot);
 router.post('/onboardDeviceDetails',onboardDeviceDetails);
 router.post('/configDeviceInDnac',configDevicesInDnac);
 router.post('/dnacDeviceInterface',dnacDeviceInterfaces);
