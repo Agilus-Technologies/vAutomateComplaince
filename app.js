@@ -10,7 +10,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 // import session from 'express-session';
 // import fileUpload from "express-fileupload";
-import rateLimit from 'express-rate-limit';
+import rateLimit from 'express-rate-limit'; 
 import logger from "./logger.js";
 import dbo from "./src/db/conn.js";
 
@@ -86,7 +86,6 @@ const connectToDb = async () => {
         await dbo?.connectToServer("", "", function (err) {
             if (err) console.error("error in db", err);
         });
-        // console.log('Connected to the database');
     } catch (err) {
         console.error('Error connecting to database:', err);
     }
@@ -95,9 +94,9 @@ const connectToDb = async () => {
 // Start the server after DB connection
 const startServer = async() => {
     const server = https.createServer(options, app);
-    await dbo?.connectToServer("", "", function (err) {
-        if (err) console.error("error in db", err);
-    });
+    // await dbo?.connectToServer("", "", function (err) {
+    //     if (err) console.error("error in db", err);
+    // });
     server.listen(port,"0.0.0.0" ,() => {
         console.log(`HTTPS server running on ${port}`);
     });

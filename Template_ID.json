@@ -1,0 +1,86 @@
+[
+  {
+    "Site": "Noida",
+    "Template in DNAC": "NOI DNAC",
+    "Template DAY0": "Onbnd-C9300-NOI-LKO-GUR-KOL",
+    "DAY1": "ISE-C9300-NOI-LKO-GUR-KOL"
+  },
+  {
+    "Site": "Lucknow",
+    "Template in DNAC": "NOI DNAC",
+    "Template DAY0": "Onbnd-C9300-NOI-LKO-GUR-KOL",
+    "DAY1": "ISE-C9300-NOI-LKO-GUR-KOL"
+  },
+  {
+    "Site": "Kolkata",
+    "Template in DNAC": "NOI DNAC",
+    "Template DAY0": "Onbnd-C9300-NOI-LKO-GUR-KOL",
+    "DAY1": "ISE-C9300-NOI-LKO-GUR-KOL"
+  },
+  {
+    "Site": "Navi Mumbai",
+    "Template in DNAC": "NOI DNAC",
+    "Template DAY0": "Onbnd-C9300-NOI-LKO-GUR-KOL",
+    "DAY1": "ISE-C9300-NOI-LKO-GUR-KOL"
+  },
+  {
+    "Site": "Nagpur",
+    "Template in DNAC": "NOI DNAC",
+    "Template DAY0": "Onbnd-C9300-NAG",
+    "DAY1": "ISE-C9300-NAG"
+  },
+  {
+    "Site": "Chennai",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-CHN",
+    "DAY1": "ISE-C9300-CHN"
+  },
+  {
+    "Site": "Bangalore",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Madurai",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Hyderabad",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Pune",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Vijayawada",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Hubli",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Kochi",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  },
+  {
+    "Site": "Coimbatore",
+    "Template in DNAC": "VIJ DNAC",
+    "Template DAY0": "Onbnd-C9300-BLR-HYD-PUN-COI-MDU",
+    "DAY1": "ISE-C9300-BLR-HYD-PUN-COI-MDU"
+  }
+]

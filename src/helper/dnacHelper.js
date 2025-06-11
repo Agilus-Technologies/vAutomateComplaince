@@ -18,98 +18,146 @@ export const db_config = async (req, res) => {
 
 };
 
+// export const getDnacToken = async (dnacCredentialsData) => {
+//     try {
+//         let hostName = dnacCredentialsData?.ip?.split("/");
+//         let aesEnabled = dnacCredentialsData?.aesAuthEnabled;
+//         const secretKey = dnacCredentialsData?.apiEncriptionKey
+//         let options;
+//         if (aesEnabled) {
+//             const username = dnacCredentialsData.username;
+//             const password = dnacCredentialsData.password;
+//             const auth = `${username}:${password}`;
+//             const cipherBase64 = encryptAES(auth, secretKey);
+//             options = {
+//                 // hostname: hostName /* '10.122.1.25' */,
+//                 hostname: hostName[2].toString() /* '10.122.1.25' */,
+//                 path: dnacCredentialsData.authUrl,
+//                 method: "POST",
+//                 headers: {
+//                     Authorization: `CSCO-AES-256 credentials=${cipherBase64}`,
+//                 },
+//                 rejectUnauthorized: false
+//             };
+//         } else {
+//             options = {
+//                 // hostname: hostName[1] /* '10.122.1.25' */,
+//                 hostname: hostName[2].toString() /* '10.122.1.25' */,
+//                 path: dnacCredentialsData.authUrl,
+//                 method: "POST",
+//                 rejectUnauthorized: false,
+//                 headers: {
+//                     Authorization: "Basic " + Buffer.from(dnacCredentialsData.username + ":" + dnacCredentialsData.password).toString("base64"),
+//                 },
+//             };
+//         };
+//         let result = await new Promise((resolve) => {
+//             var req = https.request(options, function (res) {
+//                 // console.log("res",res)
+//                 var data = [];
+//                 res
+//                     .on("data", function (chunk) {
+//                         data.push(chunk);
+//                     })
+//                     .on("end", function () {
+//                         var buffer = Buffer.concat(data);
+//                         var str = iconv.decode(buffer, "windows-1252");
+//                         resolve(JSON.parse(str));
+//                     });
+//             });
+//             req.end();
+//             req.on("error", function (error) {
+//                 if (error) {
+//                     return {
+//                         result: {
+
+//                             error: "ip is not valid.",
+//                             status: false,
+//                             tool: "DNA-C"
+//                         },
+//                     };
+//                 }
+//                 console.error("getting error is ", e);
+//             });
+//         });
+//         console.log("tokenasdfghj",result)
+//         return result;
+//     } catch (err) {
+//         console.log("Error in getDnacToken in dnacHelper", err)
+//         let msg = `Error in getDnacToken in dnacHelper:${err}`
+//         let msg_output = { "msg": msg, status: false }
+//         return msg_output;
+//     }
+// };
+
+
+
 export const getDnacToken = async (dnacCredentialsData) => {
     try {
-        let hostName = dnacCredentialsData?.ip?.split("/");
-        let aesEnabled = dnacCredentialsData?.aesAuthEnabled;
-        const secretKey = dnacCredentialsData?.apiEncriptionKey
-        let options;
+        const hostParts = dnacCredentialsData && dnacCredentialsData?.ip?.split("/");
+        const hostName = hostParts && hostParts?.[2]; // Safely extract the IP or domain
+        const aesEnabled = dnacCredentialsData && dnacCredentialsData?.aesAuthEnabled;
+        const secretKey = dnacCredentialsData && dnacCredentialsData?.apiEncriptionKey;
+
+        let url = `https://${hostName}${dnacCredentialsData.authUrl}`;
+
+        let headers = {};
         if (aesEnabled) {
-            const username = dnacCredentialsData.username;
-            const password = dnacCredentialsData.password;
+            const username = dnacCredentialsData && dnacCredentialsData.username;
+            const password = dnacCredentialsData && dnacCredentialsData.password;
             const auth = `${username}:${password}`;
             const cipherBase64 = encryptAES(auth, secretKey);
-            options = {
-                // hostname: hostName /* '10.122.1.25' */,
-                hostname: hostName[2].toString() /* '10.122.1.25' */,
-                path: dnacCredentialsData.authUrl,
-                method: "POST",
-                headers: {
-                    Authorization: `CSCO-AES-256 credentials=${cipherBase64}`,
-                },
-                rejectUnauthorized: false
+
+            headers = {
+                Authorization: `CSCO-AES-256 credentials=${cipherBase64}`
             };
         } else {
-            options = {
-                // hostname: hostName[1] /* '10.122.1.25' */,
-                hostname: hostName[2].toString() /* '10.122.1.25' */,
-                path: dnacCredentialsData.authUrl,
-                method: "POST",
-                rejectUnauthorized: false,
-                headers: {
-                    Authorization: "Basic " + Buffer.from(dnacCredentialsData.username + ":" + dnacCredentialsData.password).toString("base64"),
-                },
+            const base64Auth = Buffer.from(`${dnacCredentialsData.username}:${dnacCredentialsData.password}`).toString("base64");
+            headers = {
+                Authorization: `Basic ${base64Auth}`
             };
-        };
-        let result = await new Promise((resolve) => {
-            var req = https.request(options, function (res) {
-                // console.log("res",res)
-                var data = [];
-                res
-                    .on("data", function (chunk) {
-                        data.push(chunk);
-                    })
-                    .on("end", function () {
-                        var buffer = Buffer.concat(data);
-                        var str = iconv.decode(buffer, "windows-1252");
+        }
 
-                        resolve(JSON.parse(str));
-                    });
-            });
-            req.end();
-            req.on("error", function (error) {
-                if (error) {
-                    return {
-                        result: {
+        const agent = new https.Agent({ rejectUnauthorized: false });
 
-                            error: "ip is not valid.",
-                            status: false,
-                            tool: "DNA-C"
-                        },
-                    };
-                }
-                console.error("getting error is ", e);
-            });
+        const response = await axios.post(url, null, {
+            headers,
+            httpsAgent: agent,
+            responseType: 'arraybuffer' // Required if you're decoding it as 'windows-1252'
         });
-        return result;
+        const decodedResponse = iconv.decode(Buffer.from(response.data), "windows-1252");
+        const jsonResult = JSON.parse(decodedResponse);
+        return jsonResult;
+
     } catch (err) {
-        console.log("Error in getDnacToken in dnacHelper", err)
-        let msg = `Error in getDnacToken in dnacHelper:${err}`
-        let msg_output = { "msg": msg, status: false }
-        return msg_output;
+        console.error("Error in getDnacToken in dnacHelper", err);
+        logger.error("Error in getDnacToken in dnacHelper", err)
+        return {
+            msg: `Error in getDnacToken in dnacHelper: ${err.message || err}`,
+            status: false
+        };
     }
 };
 
-export const commonCredentials = async (ip, dnacUrl = "") => {
+
+export const commonCredentials = async (ip = "", dnacUrl = "") => {
     try {
         let db_connect = dbo && dbo.getDb()
         // let config = await db_config();
         let setUpDetails = await db_connect.collection('tbl_Package').find({}).project({ "dnac": 1, "_id": 0 }).toArray();
-        let deviceUUId = await db_connect.collection('ms_device').find({ $and: [{ source: "DNAC" }, { managementIpAddress: ip }, { "source_url": dnacUrl }]}).toArray();
-        let switchUUID = deviceUUId[0]?.device_id
-        // const { AUTH_API_URL, template_id } = config && config[0]?.dnac
-        let AUTH_API_URL="/dna/system/api/v1/auth/token"
-        let template_id="48967f32-a1de-46a0-a407-84164b8"
+        let switchUUID = "";
+        if (ip !== "") {
+            let deviceUUId = await db_connect.collection('ms_device').find({ $and: [{ source: "DNAC" }, { managementIpAddress: ip }, { "source_url": dnacUrl }] }).toArray();
+            switchUUID = deviceUUId && deviceUUId[0]?.device_id
+        }
+        let AUTH_API_URL = "/dna/system/api/v1/auth/token"
+        // let template_id = "48967f32-a1de-46a0-a407-84164b8"
         let dnacDetailss = setUpDetails[0]?.dnac.filter((item) => item?.DnacURL === dnacUrl)
         let cli_command_url = `${dnacDetailss[0]?.DnacURL}/api/v1/network-device-poller/cli/read-request`;
-        // let cli_command_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.cli_command_read_request;
-        // let deploy_temp_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.DEPLOY_TEMPLATE_URL;
-        // let temp_deploy_status_url = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.TEMPLATE_STATUS;
         let deploy_temp_url = `${dnacDetailss[0]?.DnacURL}/dna/intent/api/v1/template-programmer/template/deploy`;
         let temp_deploy_status_url = `${dnacDetailss[0]?.DnacURL}/dna/intent/api/v1/template-programmer/template/deploy/status/`;
         let interfaceAPi = `${dnacDetailss[0]?.DnacURL}/dna/intent/api/v1/interface/network-device/`;
-        // let interfaceAPi = dnacDetailss[0]?.DnacURL + config[0]?.dnac?.interfaceEndPoint + switchUUID;
-        // console.log("cli_command_url",cli_command_url)
+
         let dnacCredentials = {
             authUrl: AUTH_API_URL,
             ip: dnacDetailss[0]?.DnacURL,
@@ -119,8 +167,13 @@ export const commonCredentials = async (ip, dnacUrl = "") => {
             apiEncriptionKey: dnacDetailss[0]?.secret_key || ""
         }
         let token = await getDnacToken(dnacCredentials);
-        token = token?.Token
-        // if(token){
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        if (Object.keys(token).length == 0 || token?.Token == "") {
+            let msg = `Unable to get token from dnac in credentials`
+            let msg_output = { "msg": msg, status: false }
+            return msg_output
+        }
+        token = token && token?.Token
         let obj = {
             token: token,
             dnacCredentials,
@@ -131,10 +184,9 @@ export const commonCredentials = async (ip, dnacUrl = "") => {
             switchUUID,
             interfaceAPi,
             dnacUrl: dnacDetailss[0]?.dnacUrl || dnacUrl,
-            template_id
+            // template_id
         }
         return obj;
-        // }
     } catch (err) {
         console.log("Error in commanCredentials in dnacHelper", err)
         let msg = `Error in commanCredentials in dnacHelper:${err}`
@@ -146,6 +198,11 @@ export const commonCredentials = async (ip, dnacUrl = "") => {
 export const fileIDResponse = async (dnacUrl, device, taskOutput) => {
     try {
         let { token } = await commonCredentials(device, dnacUrl)
+        if (token == "") {
+            let msg = `Unable to get token from dnac in fileIDResponse`
+            let msg_output = { "msg": msg, status: false }
+            return msg_output
+        }
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
         });
@@ -178,6 +235,11 @@ export const fileIDResponse = async (dnacUrl, device, taskOutput) => {
 export const taskResponse = async (dnacUrl, device, taskUrl) => {
     try {
         let { token } = await commonCredentials(device, dnacUrl)
+        if (token == "") {
+            let msg = `Unable to get token from dnac in taskResponse`
+            let msg_output = { "msg": msg, status: false }
+            return msg_output
+        }
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
         });
@@ -209,6 +271,11 @@ export const taskResponse = async (dnacUrl, device, taskUrl) => {
 export const dnacResponse = async (dnacUrl, device, ip) => {
     try {
         let { token, switchUUID } = await commonCredentials(device, dnacUrl)
+        if (token == "") {
+            let msg = `Unable to get token from dnac in dnacResponse`
+            let msg_output = { "msg": msg, status: false }
+            return msg_output
+        }
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
         });
@@ -258,7 +325,11 @@ export const execute_templates = async (item) => {
         let template_id = "48967f32-a1de-46a0-a407-84197a6064b8"
         let credData = await commonCredentials(item.device, item.dnac);
         const { token, deploy_temp_url, temp_deploy_status_url, switchUUID, dnacCredentials } = credData;
-
+        if (token == "") {
+            let msg = `Unable to get token from dnac in excute_templates`
+            let msg_output = { "msg": msg, status: false }
+            return msg_output
+        }
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
         });
@@ -333,14 +404,14 @@ export const execute_templates = async (item) => {
 
         if (response.status !== 200) {
             console.log("Error: Request failed with status", response.status);
-            return {msg:`Request failed with status ${response.status}`,status:false};
+            return { msg: `Request failed with status ${response.status}`, status: false };
         }
         const deployment_id = response.data.deploymentId;
         return deployment_id;
 
     } catch (error) {
-         console.log("Error: Request failed with status", response.status);
-        return {msg:`Error in excute_template ${error.message}`,status:false};
+        console.log("Error: Request failed with status", response.status);
+        return { msg: `Error in excute_template ${error.message}`, status: false };
     }
 };
 

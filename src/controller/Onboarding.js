@@ -4,7 +4,7 @@ import https from "https";
 import logger from '../../logger.js';
 // import onboardingModel from "../../model/onboardingModel.js"
 import dbo from "../db/conn.js";
-import { commonCredentials,execute_templates } from '../helper/dnacHelper.js';
+import { commonCredentials, execute_templates } from '../helper/dnacHelper.js';
 // import setUPModel from '../../model/setup_model.js';
 // import inventoryModel from '../../model/inventoryModel.js';
 import axios from "axios";
@@ -195,7 +195,7 @@ export const configDevicesInDnac = async (req, res) => {
         datass["createdAt"] = new Date()
         datass["updatedAt"] = new Date()
         let saveData = await db_connect.collection("onboardingdata").insertOne(datass)
-      
+
         let excute_templte = await execute_templates(datass)
         // let excute_templte = await execute_templates(datass)
         let msgs = {};
@@ -212,7 +212,6 @@ export const configDevicesInDnac = async (req, res) => {
     }
 };
 
-
 export const getUnClaimedDevice = async (req, res) => {
     try {
         const { dnacUrl } = req.body;
@@ -222,59 +221,132 @@ export const getUnClaimedDevice = async (req, res) => {
         }
 
         // Hardcoded IP for testing (replace with actual source)
-        const dummyDeviceIp = "10.3.1.1";
-
+        const dummyDeviceIp = "";
         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
 
         if (!credentialsData?.token) {
             return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
         }
+        const limit = 50;
+        let offset = 0;
+        let allDevices = [];
 
-        const urlPath = `/dna/intent/api/v1/onboarding/pnp-device`;
-        // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
-        const hostName = new URL(dnacUrl).hostname;
+        while (true) {
+            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
+            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
+            const hostName = new URL(dnacUrl).hostname;
+            const httpsAgent = new https.Agent({
+                rejectUnauthorized: false
+            });
+            const options = {
+                hostname: hostName,
+                path: urlPath,
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Auth-Token": credentialsData.token
+                },
+                rejectUnauthorized: false, // Use only in trusted environments with self-signed certs
+                // httpsAgent: httpsAgent
+            };
 
-        const options = {
-            hostname: hostName,
-            path: urlPath,
-            method: "GET",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Auth-Token": credentialsData.token
-            },
-            rejectUnauthorized: false // Use only in trusted environments with self-signed certs
-        };
+            const result = await new Promise((resolve, reject) => {
+                const req = https.request(options, (res) => {
+                    let data = [];
 
-        const result = await new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                let data = [];
-
-                res.on('data', chunk => data.push(chunk));
-                res.on('end', () => {
-                    try {
-                        const responseBody = Buffer.concat(data).toString();
-                        const parsed = JSON.parse(responseBody);
-                        resolve(parsed);
-                    } catch (e) {
-                        reject({ msg: "Error parsing response from DNAC", error: e });
-                    }
+                    res.on('data', chunk => data.push(chunk));
+                    res.on('end', () => {
+                        try {
+                            const responseBody = Buffer.concat(data).toString();
+                            const parsed = JSON.parse(responseBody);
+                            resolve(parsed || []);
+                        } catch (e) {
+                            reject({ msg: "Error parsing response from DNAC", error: e });
+                        }
+                    });
                 });
+
+                req.on('error', (e) => reject({ msg: "HTTPS request failed", error: e.message }));
+                req.end();
             });
 
 
-            req.on('error', (e) => {
-                reject({ msg: "HTTPS request failed", error: e.message });
-            });
+            allDevices.push(...result);
+            offset += limit;
+            if (result.length < limit) break;
+        }
 
-            req.end();
+        const formatted = allDevices.map(device => ({
+            id: device.id,
+            ...device.deviceInfo,
+            ...device.progress
+        }));
+
+        return res.status(200).json({
+            status: true,
+            data: formatted
         });
-        return res.status(200).json({ status: true, data: result });
+
 
     } catch (err) {
         console.error("Error in getUnClaimedDevice:", err);
         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
     }
 };
+
+// export const getUnClaimedDevice = async (req, res) => {
+//     try {
+//         const { dnacUrl } = req.body;
+
+//         if (!dnacUrl) {
+//             return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
+//         }
+
+//         // Hardcoded IP for testing (replace with actual source)
+//         const dummyDeviceIp = "";
+
+//         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
+
+//         if (!credentialsData?.token) {
+//             return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
+//         }
+//         let offset = 1
+//         let limit = 200
+//         let allData=[]
+//         let fetchStatus=true
+//         while(fetchStatus){
+//             const urlPath = `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
+//             const httpsAgent = new https.Agent({
+//                 rejectUnauthorized: false
+//             });
+//             const options = {
+//                 url: urlPath,
+//                 method: "GET",
+//                 headers: {
+//                     "Content-Type": "application/json",
+//                     "X-Auth-Token": credentialsData.token
+//                 },
+//                 httpsAgent: httpsAgent
+//             };
+//             const response = await axios.request(options);
+//             const devices = response.data || [];
+//             allData.push(devices)
+//             if (response.data < limit) {
+//                 fetchStatus = false; // No more data left to fetch
+//             } else {
+//                 offset += limit;
+//             }
+//         }
+//             console.log("response", allData)
+
+//         // const urlPath = `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device`;
+//         return res.status(200).json({ status: true, data:allData });
+
+//     } catch (err) {
+//         console.error("Error in getUnClaimedDevice:", err);
+//         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
+//     }
+// };
 
 
 export const getDnacSites = async (req, res) => {
@@ -286,7 +358,7 @@ export const getDnacSites = async (req, res) => {
         }
 
         // Use dummy IP just to pass to commonCredentials
-        const dummyDeviceIp = "10.3.1.1";
+        const dummyDeviceIp = "";
         const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
 
         if (!creds?.token) {
@@ -341,7 +413,7 @@ export const getDnacSites = async (req, res) => {
 
 export const getImageID = async (dnacUrl) => {
     try {
-        const dummyDeviceIp = "10.3.1.1";  //dummy
+        const dummyDeviceIp = "";  //dummy
         const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
@@ -375,7 +447,7 @@ export const getImageID = async (dnacUrl) => {
 
 export const getTemplate = async (dnacUrl) => {
     try {
-        const dummyDeviceIp = "10.3.1.1";  //dummy
+        const dummyDeviceIp = "";  //dummy
         const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
@@ -425,9 +497,9 @@ function findBestMatch(response, targetDisplayVersion) {
 
 export const pnpSiteClaim = async (data, dnac) => {
     try {
-        let dummydevice = "10.122.1.3"  //not in use
+        let dummydevice = ""  //not in use 
         let credData = await commonCredentials(dummydevice, dnac);
-        const { token, deploy_temp_url, temp_deploy_status_url, switchUUID, dnacCredentials } = credData;
+        const { token} = credData;
 
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
@@ -441,18 +513,21 @@ export const pnpSiteClaim = async (data, dnac) => {
                 'x-auth-token': token,
                 'Content-Type': 'application/json'
             },
-            data: data,
+            data:JSON.stringify(data),
             httpsAgent: httpsAgent
         };
+
         const response = await axios.request(config);
+        console.log("response", response)
         let deploymentIdsss = JSON.stringify(response.data, null, 2)
+        console.log("deploymentIdsss", deploymentIdsss)
         deploymentIdsss = JSON.parse(deploymentIdsss)
         return deploymentIdsss
 
     } catch (err) {
         console.log("error in pnpSiteClaim", err)
-        res.status(500).json({
-            msg: "Internal server error in site claim",
+        return ({
+            msg: "Internal server error in pnp",
             error: err.message,
             status: false
         });
@@ -472,103 +547,180 @@ export const saveClaimSiteData = async (req, res) => {
         }
 
         let getTemplateID = await getTemplate(payload.dnacUrl)
-        getTemplateID = JSON.parse(getTemplateID)
-        let filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
-        if (!filterTemplate || filterTemplate.length == 0) {
-            return res.json({ msg: "Unable to find template from dnac", status: false })
+        console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
+        let filterTemplate;
+        if (getTemplateID) {
+            getTemplateID = JSON.parse(getTemplateID)
+            filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
         }
-        let getimageID = await getImageID(payload.dnacUrl)
-        let parseData = JSON.parse(getimageID)
-        let isTaggedGoldenFilterData = parseData.response.filter((item) => item.isTaggedGolden === true)
+        // if (!filterTemplate || filterTemplate.length == 0) {
+        //     return res.json({ msg: "Unable to find template from dnac", status: false })
+        // }
 
-        const desiredVersion = payload?.goldenImage;
-        function normalizeVersion(ver) {
-            if (typeof ver !== 'string') return null;
+        //********** get image id**********************
 
-            // Reject if any non-numeric (letter/symbol) appears
-            if (!/^\d+(\.\d+){1,2}$/.test(ver)) return null;
+        // let getimageID = await getImageID(payload.dnacUrl)
+        // let parseData = JSON.parse(getimageID)
+        // let isTaggedGoldenFilterData = parseData.response.filter((item) => item.isTaggedGolden === true)
 
-            const parts = ver.split('.').map(Number);
-            while (parts.length < 3) parts.push(0);
-            return parts.slice(0, 3).join('.');
-        }
-        const exactMatch = isTaggedGoldenFilterData.filter(entry => {
-            const normalizedEntryVersion = normalizeVersion(entry.displayVersion);
-            const normalizedDesiredVersion = normalizeVersion(desiredVersion);
-            if (!normalizedEntryVersion || !normalizedDesiredVersion) return false;
-            return semver.eq(normalizedEntryVersion, normalizedDesiredVersion);
-        });
+        // const desiredVersion = payload?.goldenImage;
+        // function normalizeVersion(ver) {
+        //     if (typeof ver !== 'string') return null;
 
-        if (!exactMatch || exactMatch.length == 0) {
-            console.log("No matching item found.");
-            return res.json({ msg: "No matching item found for golden image id", status: false })
-        }
-        let imageUUId;
-        for (let i = 0; i < exactMatch[0].applicableDevicesForImage.length; i++) {
-            if (exactMatch[0].applicableDevicesForImage[i].productId.includes(payload.pid)) {
-                console.log(true)
-                imageUUId = exactMatch[0].imageUuid
-                break;
-            } else {
-                console.log(false)
-            }
-        }
-        if (!imageUUId || imageUUId == "") {
-            return res.json({ msg: "Image id not found", status: false })
-        }
+        //     // Reject if any non-numeric (letter/symbol) appears
+        //     if (!/^\d+(\.\d+){1,2}$/.test(ver)) return null;
 
+        //     const parts = ver.split('.').map(Number);
+        //     while (parts.length < 3) parts.push(0);
+        //     return parts.slice(0, 3).join('.');
+        // }
+        // const exactMatch = isTaggedGoldenFilterData.filter(entry => {
+        //     const normalizedEntryVersion = normalizeVersion(entry.displayVersion);
+        //     const normalizedDesiredVersion = normalizeVersion(desiredVersion);
+        //     if (!normalizedEntryVersion || !normalizedDesiredVersion) return false;
+        //     return semver.eq(normalizedEntryVersion, normalizedDesiredVersion);
+        // });
+
+        // if (!exactMatch || exactMatch.length == 0) {
+        //     console.log("No matching item found.");
+        //     return res.json({ msg: "No matching item found for golden image id", status: false })
+        // }
+        // let imageUUId;
+        // for (let i = 0; i < exactMatch[0].applicableDevicesForImage.length; i++) {
+        //     if (exactMatch[0].applicableDevicesForImage[i].productId.includes(payload.pid)) {
+        //         console.log(true)
+        //         imageUUId = exactMatch[0].imageUuid
+        //         break;
+        //     } else {
+        //         console.log(false)
+        //     }
+        // }
+        // if (!imageUUId || imageUUId == "") {
+        //     return res.json({ msg: "Image id not found", status: false })
+        // }
+        // ********************************************************************************
         let data = {
             "deviceId": payload?.devideID,
             "siteId": payload?.site,
             "type": "Default",
-            "imageInfo": {
-                "imageId": imageUUId,
-                "skip": true
-            },
-            "configInfo": [
-                {
-                    "configId": filterTemplate[0]?.templateId,
-                    "configParameters": {
-                        "Hostname": payload?.hostname,
-                        "vtpversion": payload?.vtpVersion,
-                        "vtpdomain": payload?.vtpDomainNam,
-                        "vtppwd": payload?.vtpPassword,
-                        "SPANMODE": payload?.stp,
-                        "vlanid": payload?.mgmtVlanL2,
-                        "MGMTINT": payload?.mgmtVlanL3Interface,
-                        "ipaddress": payload?.mgmtL3IP,
-                        "SNMPLocation": payload?.snmpLocation,
-                        "LOGGINGHOST1": payload?.loggingHost1,
-                        "LOGGINGHOST2": payload?.loggingHost2,
-                        "uplinkinterface": payload?.accessUplink
+            "configInfo": {
+                "configId": filterTemplate && filterTemplate[0]?.templateId || "0514a78a-67d5-405b-846d-8ba43610e6a9",
+                "configParameters": [
+                    {
+                        "key": "vtpversion",
+                        "value": payload?.vtpVersion
+                    },
+                    {
+                        "key": "ipaddress",
+                        "value": payload?.mgmtL3IP
+                    },
+                    {
+                        "key": "vtpdomain",
+                        "value": payload?.vtpDomainName
+                    },
+                    {
+                        "key": "vtppwd",
+                        "value": payload?.vtpPassword
+                    },
+                    {
+                        "key": "uplinkinterface",
+                        "value": payload?.accessUplink
+                    },
+                    {
+                        "key": "LOGGINGHOST1",
+                        "value": payload?.loggingHost1
+                    },
+                    {
+                        "key": "ipmask",
+                        "value": payload.mgmtL3Subnet
+                    },
+                    {
+                        "key": "SNMPLocation",
+                        "value": payload?.snmpLocation
+                    },
+                    {
+                        "key": "LOGGINGHOST2",
+                        "value": payload?.loggingHost2
+                    },
+                    {
+                        "key": "vlanid",
+                        "value": payload?.mgmtVlanL2
+                    },
+                    {
+                        "key": "MGMTINT",
+                        "value": payload?.mgmtVlanL3Interface
+                    },
+                    {
+                        "key": "SPANMODE",
+                        "value": payload?.stp
+                    },
+                    {
+                        "key": "Hostname",
+                        "value": payload?.hostname
                     }
-                }
-            ]
-        }
 
+                ]
+            }
+        }
+        // let data = {
+        //     "deviceId": payload?.devideID,
+        //     "siteId": payload?.site,
+        //     "type": "Default",
+        //     "imageInfo": {
+        //         "imageId": imageUUId,
+        //         "skip": true
+        //     },
+        //     "configInfo": [
+        //         {
+        //             "configId": filterTemplate[0]?.templateId,
+        //             "configParameters": {
+        //                 "Hostname": payload?.hostname,
+        //                 "vtpversion": payload?.vtpVersion,
+        //                 "vtpdomain": payload?.vtpDomainNam,
+        //                 "vtppwd": payload?.vtpPassword,
+        //                 "SPANMODE": payload?.stp,
+        //                 "vlanid": payload?.mgmtVlanL2,
+        //                 "MGMTINT": payload?.mgmtVlanL3Interface,
+        //                 "ipaddress": payload?.mgmtL3IP,
+        //                 "SNMPLocation": payload?.snmpLocation,
+        //                 "LOGGINGHOST1": payload?.loggingHost1,
+        //                 "LOGGINGHOST2": payload?.loggingHost2,
+        //                 "uplinkinterface": payload?.accessUplink
+        //             }
+        //         }
+        //     ]
+        // }
+        console.log("claim payload: ", JSON.stringify(data, null, 2))
         const timestamp = new Date();
         const documentToInsert = {
             ...payload,
             configData: data,
+            claimStatus: "",
             createdAt: timestamp,
             updatedAt: timestamp,
         };
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
-
         //site-claim api
-        // let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
-
-
-        return res.status(200).json({ msg: "Data saved successfully", status: true });
+        let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
+        console.log("pnpSiteDeviceClaim", pnpSiteDeviceClaim);
+        // let updateData = await db_connect.collection("siteclaimdata").update({ "_id": ObjectId("682330e4d861028d53209239") },{ $set:{ "claimStatus": "success"}});
+        return res.status(200).json({ msg: pnpSiteDeviceClaim?.response || "", status: true });
     } catch (err) {
+        let msgError = {
+            msg: "Internal server error in site claim",
+            error: err.message,
+            status: false
+        }
         console.error("Error in saveClaimSiteData:", err);
-        logger.error({ msg: `Error in saveClaimSiteData: ${err}`, status: false })
-        return res.status(500).json({ msg: `Error in saveClaimSiteData: ${err}`, status: false });
+        logger.error({
+            msg: "Internal server error in site claim",
+            error: err,
+            status: false
+        })
+        return res.status(500).json(msgError);
     }
 };
-
-
 
 
 export const postPnPDeviceSiteClaim = async (req, res) => {
@@ -591,7 +743,7 @@ export const postPnPDeviceSiteClaim = async (req, res) => {
         }
 
         // Get token from common credentials
-        const dummyDeviceIp = "10.3.3.3"; // Just needed for token lookup
+        const dummyDeviceIp = ""; // Just needed for token lookup
         const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
         if (!creds?.token) {
             return res.status(401).json({ msg: "Failed to get token from DNAC", status: false });
@@ -660,10 +812,10 @@ export const postPnPDeviceSiteClaim = async (req, res) => {
 
 export const sendMailForScreenShot = async (req, res) => {
     try {
-        const data=req.body
-        const dat1=req.files
-        console.log(data,"data")
-        console.log(dat1,"dat1")
+        const data = req.body
+        const dat1 = req.files
+        console.log(data, "data")
+        console.log(dat1, "dat1")
         setImmediate(async () => {
             try {
                 // Email to User
@@ -753,8 +905,6 @@ export const sendMailForScreenShot = async (req, res) => {
 //         }
 //         logger.info({ msg: "Data get successfully", status: true })
 //         return res.json({ data: obj, msg: "Data get successfully", status: true })
-
-
 //     } catch (err) {
 //         let errorMsg = { data: [], msg: `Error msg in onboardDeviceDetails:${err}`, status: false }
 //         logger.error(errorMsg)

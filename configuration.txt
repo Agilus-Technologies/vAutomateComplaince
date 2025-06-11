@@ -1,0 +1,84 @@
+host name---ISE-3
+ip--10.6.1.35
+user---admin
+password----Vspl@1234
+
+
+
+interface GigabitEthernet1/0/8
+#switchport access vlan 122
+#switchport mode access
+#switchport voice vlan 180
+#no shutdown
+
+
+/ancendpoint/
+voice+data.....................
+interface GigabitEthernet1/0/8\ndescription "<>"\nswitchport mode access\nswitchport access vlan 122\nswitchport voice vlan 180\nno shutdown
+
+--------data,cctv
+interface GigabitEthernet1/0/8\ndescription "<>\nswitchport mode access\nswitchport access vlan 122\nno shutdown
+
+
+-----------------voice
+
+interface GigabitEthernet1/0/8\ndescription "<>"\nswitchport mode access\nswitchport voice vlan 180\nno shutdown
+
+
+//radius and tacacs
+aaa new-model
+
+aaa group server radius ISE
+ server name server1
+ server name server2
+aaa server radius dynamic-author
+ client 123.123.123.125 server-key 7 12312414
+ client 123.123.123.126 server-key 7 123213214
+
+radius-server attribute 6 on-for-login-auth
+radius-server attribute 8 include-in-access-req
+radius-server attribute 25 access-request include
+radius-server dead-criteria time 5 tries 2
+radius-server deadtime 10
+
+radius server server1
+ address ipv4 123.123.123.125 auth-port 1812 acct-port 1813
+ key 7 12312414
+
+radius server server2
+ address ipv4 123.123.123.126 auth-port 1812 acct-port 1813
+ key 7 123213214
+
+aaa group server tacacs+ Network
+ server-private 123.123.123.123 key 7 adqkjwhqw231321
+ server-private 123.123.123.124 key 7 asjhdlasdhadasd
+
+aaa authentication login default group Network local
+aaa authentication enable default group Network enable none
+aaa authentication dot1x default group ISE
+aaa authorization console
+aaa authorization config-commands
+aaa authorization exec default group Network local if-authenticated
+aaa authorization commands 0 default group Network local if-authenticated
+aaa authorization commands 1 default group Network local if-authenticated
+aaa authorization commands 15 default group Network local if-authenticated
+aaa authorization network default group ISE
+aaa accounting send stop-record authentication failure
+aaa accounting dot1x default start-stop group ISE
+aaa accounting exec default start-stop group Network
+aaa accounting commands 0 default start-stop group Network
+aaa accounting commands 1 default start-stop group Network
+aaa accounting commands 15 default start-stop group Network
+aaa accounting network default start-stop group tacacs+
+aaa accounting connection default start-stop group Network
+aaa accounting system default start-stop group Network
+
+
+
+aaa session-id common
+
+
+
+
+
+
