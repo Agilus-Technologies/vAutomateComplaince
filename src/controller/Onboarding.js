@@ -601,6 +601,7 @@ export const saveClaimSiteData = async (req, res) => {
         // ********************************************************************************
         let data = {
             "deviceId": payload?.devideID,
+            "device":   payload?.device,
             "siteId": payload?.site,
             "type": "Default",
             "configInfo": {
@@ -912,6 +913,140 @@ export const sendMailForScreenShot = async (req, res) => {
 //     }
 
 // };
+
+
+export const getPnpDevices = async (req, res) => {
+    try {
+        const db_connect = dbo && dbo.getDb();
+
+        // Fetch the latest document from ms_pnp_data
+        const latestDoc = await db_connect.collection('ms_pnp_data').findOne({name:"pnp_data"});
+
+        if (!latestDoc || !latestDoc.PE_DEVICE_DAY_0) {
+            return res.status(404).json({ message: 'No PE_DEVICE_DAY_0 data found.' });
+        }
+
+        const formattedDevices = latestDoc.PE_DEVICE_DAY_0.map(device => {
+            const hostname = device.pe_hostname ?? 'unknown';
+            const pnpIP = device.pnp_ip_address ?? '0.0.0.0';
+            return `${hostname} (${pnpIP})`;
+        });
+
+        return res.status(200).json({ devices: formattedDevices });
+
+    } catch (err) {
+        console.error('Error in getPnpDevices:', err);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+export const getFloorValue = async (req, res) => {
+    try {
+        const db_connect = dbo && dbo.getDb();
+
+        // Fetch the latest document from ms_pnp_data
+        const latestDoc = await db_connect.collection('ms_pnp_data').findOne({name:"pnp_data"});
+
+        if (!latestDoc || !latestDoc.PE_DEVICE_DAY_0) {
+            return res.status(404).json({ message: 'No PE_DEVICE_DAY_0 data found.' });
+        }
+
+        // const formatted = latestDoc.PE_DEVICE_DAY_0.map(device => {
+        //     return `${device.list_of_floor ?? 'unknown'})`;
+        // });
+        const formatted = [...new Set(latestDoc.PE_DEVICE_DAY_0.map(d => d.list_of_floor ?? 'unknown'))].map(f => `${f}`);
+
+
+        return res.status(200).json({ data: formatted });
+
+    } catch (err) {
+        console.error('Error in get Floor Value:', err);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+export const getTemplatesByFloor = async (req, res) => {
+    try {
+        const db_connect = dbo && dbo.getDb();
+        let siteQuery = req.query.name; // ?name=Lucknow - SkillDevelopmentCenter Block 1)
+
+        if (!siteQuery) {
+            return res.status(400).json({ error: 'Site name is required in query' });
+        }
+
+        // Fetch template array from DB
+        const templateDoc = await db_connect.collection("ms_pnp_data").findOne({name:"templateData"}, { projection: { Template_ID: 1 } });
+
+        if (!templateDoc || !templateDoc.Template_ID) {
+            return res.status(404).json({ error: 'Template data not found in DB' });
+        }
+
+        const templates = templateDoc.Template_ID;
+
+            // Normalize siteQuery: handle "Bengaluru" → "Bangalore"
+           siteQuery = siteQuery.toLowerCase().replace('bengaluru', 'bangalore');
+           siteQuery = siteQuery.toLowerCase().replace('Mumbai','Navi Mumbai');
+
+
+         const matchedTemplates = templates.filter(template => {
+            return siteQuery.toLowerCase().includes(template.site.toLowerCase());
+        });
+
+        if (!matchedTemplates.length) {
+            return res.status(404).json({ error: 'No matching templates found for the given site' });
+        }
+
+        return res.status(200).json(matchedTemplates);
+
+    } catch (err) {
+        console.error('Error in getTemplatesByFloor:', err);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+
+// Controller
+export const getDeviceDetails = async (req, res) => {
+  try {
+    const { hostname, ip, site } = req.query;
+    if (!site) {
+      return res.status(400).json({ error: "Provide at least one search parameter" });
+    }
+
+    const db_connect = dbo.getDb(); // assume `dbo` is your db instance
+
+    const query = {
+      "name": "pnp_data", // Assuming you are looking for a specific document
+      "PE_DEVICE_DAY_0": {
+        $elemMatch: {
+        //   ...(hostname && { pe_hostname: hostname }),
+        //   ...(ip && { pe_ip: ip }),
+          ...(site && { list_of_floor: site }),
+        },
+      },
+    };
+
+    const doc = await db_connect.collection("ms_pnp_data").findOne(query);
+
+    if (!doc) return res.status(404).json({ error: "Device not found" });
+
+    const matchedDevice = doc.PE_DEVICE_DAY_0.find(dev =>
+      (!hostname || dev.pe_hostname === hostname) &&
+      (!ip || dev.pe_ip === ip) &&
+      (!site || dev.list_of_floor === site)
+    );
+
+    if (!matchedDevice) return res.status(404).json({ error: "Device not matched in array" });
+
+    res.json(matchedDevice);
+  } catch (err) {
+    console.error("Error in getDeviceDetails:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+
 
 
 

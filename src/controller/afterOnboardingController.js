@@ -37,6 +37,62 @@ export const deviceDetails = async (req, res) => {
     }
 };
 
+export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
+  try {
+    const db_connect = dbo.getDb(); // get your db connection
+    const source_url = req.query.source_url;
+
+    if (!source_url) {
+      return res.status(400).json({ error: "Missing source_url in query" });
+    }
+
+    // Step 1: Get the latest record from siteclaimdata by dnacUrl
+    const siteClaimCollection = db_connect.collection("siteclaimdata");
+    const latestSiteClaim = await siteClaimCollection
+      .find({ dnacUrl: source_url })
+      .sort({ createdAt: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestSiteClaim.length) {
+      return res.status(404).json({ message: "No siteclaimdata found for source_url" });
+    }
+
+    const siteClaim = latestSiteClaim[0];
+    const snmpLocation = siteClaim.snmpLocation;
+
+    if (!snmpLocation) {
+      return res.status(404).json({ message: "SNMP location not found in siteclaimdata" });
+    }
+
+    // Step 2: Find a match in ms_pnp_data collection inside PNP_Template_DAY_N array
+    const pnpCollection = db_connect.collection("ms_pnp_data");
+
+    const matchedRecord = await pnpCollection.findOne({
+      "PNP_Template_DAY_N.snmp_location": snmpLocation,
+    });
+
+    if (!matchedRecord) {
+      return res.status(404).json({ message: "No PNP Template found for SNMP location" });
+    }
+
+    // Optionally extract only the matching template entry from array:
+    const matchingTemplate = matchedRecord.PNP_Template_DAY_N.find(
+      (entry) => entry.snmp_location === snmpLocation
+    );
+
+    return res.status(200).json({
+    //   siteClaim,
+      matchedPNPTemplate: matchingTemplate || null,
+    });
+  } catch (err) {
+    console.error("Error:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+
 export const pingDevice = async (req, res) => {
     try {
         let { ip, device, dnacUrl } = req.body
@@ -239,9 +295,9 @@ export const validateDataFromDnac = async (dnacUrl, device) => {
         };
         let result = await axios.request(config)
         if (result && result.status == 200) {
-            console.log("The device is successfully configured and accessible.")
-            logger.error({ msg: `The device is successfully configured and accessible`, status: false })
-            let msg = { msg: `The device is successfully configured and accessible`, status: false }
+            // console.log("The device is successfully configured and accessible.")
+            logger.error({ msg: `The device is successfully configured and accessible`, status: true })
+            let msg = { msg: `The device is successfully configured and accessible`, status: true }
             return msg
         } else {
             console.log("The device is successfully configured but not accessible.", result)
@@ -326,24 +382,31 @@ export const tacacsAndRadiusConf = async (req, res) => {
         config += commonConfig
 
         console.log("config2", config)
-        let dnacData = {
+        let Data = {
             config: config,
             dnac: data?.dnacUrl,
             device: data?.device
         }
-        let excuteConfigInDnac = await execute_templates(dnacData)
-        let msgs = {};
+        return res.json({ msg: "configured Created successfully.", status: true,Data }
+)
+        // let dnacData = {
+        //     config: config,
+        //     dnac: data?.dnacUrl,
+        //     device: data?.device
+        // }
+        // let excuteConfigInDnac = await execute_templates(dnacData)
+        // let msgs = {};
 
-        if (excuteConfigInDnac == "SUCCESS") {
-            msgs = { msg: "Device configured successfully.", status: true }
-            let validateResponse = await validateDataFromDnac(data?.dnacUrl, data?.device)
-            console.log(validateResponse)
-            logger.info(validateResponse)
-            return res.json(validateResponse)
-        } else {
-            msgs = { msg: "Unable to configured device.", status: false }
-            return res.json(msgs)
-        }
+        // if (excuteConfigInDnac == "SUCCESS") {
+        //     msgs = { msg: "Device configured successfully.", status: true }
+        //     let validateResponse = await validateDataFromDnac(data?.dnacUrl, data?.device)
+        //     console.log(validateResponse)
+        //     logger.info(validateResponse)
+        //     return res.json(validateResponse)
+        // } else {
+        //     msgs = { msg: "Unable to configured device.", status: false }
+        //     return res.json(msgs)
+        // }
 
     } catch (err) {
         console.log("Error in tacacsAndRadiusConf", err)
@@ -352,6 +415,48 @@ export const tacacsAndRadiusConf = async (req, res) => {
         return res.send(msgError)
     }
 };
+
+
+
+/**
+ * @desc Configure a device via DNAC and validate the result
+ * @route POST /api/configure-device
+ */
+export const configureDevice = async (req, res) => {
+    try {
+        const { config, dnac, device } = req.body.commandData;
+
+        if (!config || !dnac || !device) {
+            return res.status(400).json({
+                status: false,
+                msg: "Missing required fields: config, dnac, or device."
+            });
+        }
+
+        const dnacData = { config, dnac: dnac, device };
+        const executeResult = await execute_templates(dnacData);
+
+        if (executeResult === "SUCCESS") {
+            const validateResponse = await validateDataFromDnac(dnac, device);
+            logger?.info(validateResponse); // Optional logging
+            return res.json(validateResponse);
+        } else {
+            return res.json({
+                status: false,
+                msg: "Unable to configure device."
+            });
+        }
+
+    } catch (error) {
+        console.error("DNAC Configuration Error:", error);
+        return res.status(500).json({
+            status: false,
+            msg: "Internal Server Error",
+            error: error.message
+        });
+    }
+};
+
 
 export const configureDeviceInISE = async (req, res) => {
     try {
@@ -504,32 +609,58 @@ export const configureDeviceInISE = async (req, res) => {
     }
 }
 
+
+function normalizeKeys(row) {
+    const normalized = {};
+    for (const key in row) {
+        const newKey = key.toLowerCase().replace(/\s+/g, '_');
+        normalized[newKey] = row[key];
+    }
+    return normalized;
+}
+
 export const convertExcelToJSON = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-        const __dirname = path.resolve()
-        const filePath = path.join(__dirname, 'test.xlsx');
+        const __dirname = path.resolve();
+        const filePath = path.join(__dirname, 'Assignment_Group.xlsx');
         const workbook = xlsx.readFile(filePath);
-        const sheetName = workbook.SheetNames;
-        let outputData = {}
-        for (let i = 0; i < sheetName.length; i++) {
-            const worksheet = workbook.Sheets[sheetName[i]];
-            let jsonData = xlsx.utils.sheet_to_json(worksheet);
-            outputData[`${sheetName[i]}`] = jsonData
+        const sheetNames = workbook.SheetNames;
+
+        let outputData = {};
+
+        for (let i = 0; i < sheetNames.length-1; i++) {
+            const sheet = workbook.Sheets[sheetNames[0]];
+            let jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
+
+            jsonData = jsonData.map(row => {
+                row = normalizeKeys(row);
+                return {
+                    ...row,
+                    mgmt_subnet: row['mgmt_subnet'] ?? '10.138.132.128/25',
+                    reserved_seed_ports: row['reserved_seed_ports'] ?? 'Need to Reserve Two ports one from primary and one from secondary'
+                };
+            });
+
+            outputData[sheetNames[i]] = jsonData;
         }
+
         if (Object.keys(outputData).length !== 0) {
-            let savePNPData = await db_connect.collection('ms_pnp_data').insertOne(outputData)
-            console.log('Excel converted to JSON successfully!');
-            return;
+            let savePNPData = await db_connect.collection('ms_pnp_data').insertOne(outputData);
+            console.log('Excel converted to JSON and saved to MongoDB!');
+            return res.status(200).json({ message: "Data inserted successfully" });
         } else {
-            console.log("UNable to read data from excel in pnp")
-            return;
+            console.log("Unable to read data from Excel in PNP");
+            return res.status(400).json({ message: "No data found in Excel" });
         }
+
     } catch (err) {
-        console.log("error in convertExcelToJSON", err)
-        return;
+        console.log("Error in convertExcelToJSON:", err);
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
-}
+};
+
+
 
 export const pnpDatafromDB = async (req, res) => {
     try {
