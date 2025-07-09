@@ -1,5 +1,5 @@
 import express from "express"
-import { configurationDetails, configureDevice, configureDeviceInISE, convertExcelToJSON, deviceDetails, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf} from "../controller/afterOnboardingController.js";
+import { configurationDetails, configureDevice, configureDeviceInISE, deviceDetails, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf} from "../controller/afterOnboardingController.js";
 
 
 
@@ -15,8 +15,11 @@ router.post('/tacacsAndRadiusConfs',tacacsAndRadiusConf);
 router.post("/configure-device", configureDevice);
 router.get('/configureDeviceInISE',configureDeviceInISE);
 router.get('/pnpDatafromDB',pnpDatafromDB);
-router.get('/convertExcelToJSON',convertExcelToJSON);
+// router.get('/convertExcelToJSON',convertExcelToJSON);
 router.get('/getLatestSiteClaimBySourceUrl',getSiteClaimAndPnpTemplateBySourceUrl);
+
+
+
 
 
 

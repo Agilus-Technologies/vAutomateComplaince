@@ -38,57 +38,57 @@ export const deviceDetails = async (req, res) => {
 };
 
 export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
-  try {
-    const db_connect = dbo.getDb(); // get your db connection
-    const source_url = req.query.source_url;
+    try {
+        const db_connect = dbo.getDb(); // get your db connection
+        const source_url = req.query.source_url;
 
-    if (!source_url) {
-      return res.status(400).json({ error: "Missing source_url in query" });
+        if (!source_url) {
+            return res.status(400).json({ error: "Missing source_url in query" });
+        }
+
+        // Step 1: Get the latest record from siteclaimdata by dnacUrl
+        const siteClaimCollection = db_connect.collection("siteclaimdata");
+        const latestSiteClaim = await siteClaimCollection
+            .find({ dnacUrl: source_url })
+            .sort({ createdAt: -1 })
+            .limit(1)
+            .toArray();
+
+        if (!latestSiteClaim.length) {
+            return res.status(404).json({ message: "No siteclaimdata found for source_url" });
+        }
+
+        const siteClaim = latestSiteClaim[0];
+        const snmpLocation = siteClaim.snmpLocation;
+
+        if (!snmpLocation) {
+            return res.status(404).json({ message: "SNMP location not found in siteclaimdata" });
+        }
+
+        // Step 2: Find a match in ms_pnp_data collection inside PNP_Template_DAY_N array
+        const pnpCollection = db_connect.collection("ms_pnp_data");
+
+        const matchedRecord = await pnpCollection.findOne({
+            "PNP_Template_DAY_N.snmp_location": snmpLocation,
+        });
+
+        if (!matchedRecord) {
+            return res.status(404).json({ message: "No PNP Template found for SNMP location" });
+        }
+
+        // Optionally extract only the matching template entry from array:
+        const matchingTemplate = matchedRecord.PNP_Template_DAY_N.find(
+            (entry) => entry.snmp_location === snmpLocation
+        );
+
+        return res.status(200).json({
+            //   siteClaim,
+            matchedPNPTemplate: matchingTemplate || null,
+        });
+    } catch (err) {
+        console.error("Error:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
     }
-
-    // Step 1: Get the latest record from siteclaimdata by dnacUrl
-    const siteClaimCollection = db_connect.collection("siteclaimdata");
-    const latestSiteClaim = await siteClaimCollection
-      .find({ dnacUrl: source_url })
-      .sort({ createdAt: -1 })
-      .limit(1)
-      .toArray();
-
-    if (!latestSiteClaim.length) {
-      return res.status(404).json({ message: "No siteclaimdata found for source_url" });
-    }
-
-    const siteClaim = latestSiteClaim[0];
-    const snmpLocation = siteClaim.snmpLocation;
-
-    if (!snmpLocation) {
-      return res.status(404).json({ message: "SNMP location not found in siteclaimdata" });
-    }
-
-    // Step 2: Find a match in ms_pnp_data collection inside PNP_Template_DAY_N array
-    const pnpCollection = db_connect.collection("ms_pnp_data");
-
-    const matchedRecord = await pnpCollection.findOne({
-      "PNP_Template_DAY_N.snmp_location": snmpLocation,
-    });
-
-    if (!matchedRecord) {
-      return res.status(404).json({ message: "No PNP Template found for SNMP location" });
-    }
-
-    // Optionally extract only the matching template entry from array:
-    const matchingTemplate = matchedRecord.PNP_Template_DAY_N.find(
-      (entry) => entry.snmp_location === snmpLocation
-    );
-
-    return res.status(200).json({
-    //   siteClaim,
-      matchedPNPTemplate: matchingTemplate || null,
-    });
-  } catch (err) {
-    console.error("Error:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 
@@ -229,15 +229,60 @@ export const configurationDetails = async (req, res) => {
         }
         const { interfaceLevel } = data;
         let interfaceConfig = ""
+        // interfaceLevel.forEach((item) => {
+        //     if (item?.port_description?.toLowerCase() == "voice") {
+        //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport voice vlan ${item?.voice_vlan}\nno shutdown\n`
+        //     } else if (item?.port_description?.toLowerCase() == "voice+data") {
+        //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nswitchport voice vlan ${item?.voice_vlan}\nno shutdown\n`
+        //     } else {
+        //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nno shutdown\n`
+        //     }
+        // });
         interfaceLevel.forEach((item) => {
-            if (item?.port_description?.toLowerCase() == "voice") {
-                interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport voice vlan ${item?.voice_vlan}\nno shutdown\n`
-            } else if (item?.port_description?.toLowerCase() == "voice+data") {
-                interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nswitchport voice vlan ${item?.voice_vlan}\nno shutdown\n`
+            const intf = item?.interface;
+            const rawDesc = item?.port_description || '';
+            const desc = rawDesc.toLowerCase();
+            const accessVlan = item?.access_vlan;
+            const voiceVlan = item?.voice_vlan;
+
+            interfaceConfig += `interface ${intf}\n`;
+            interfaceConfig += `description "${rawDesc}"\n`;
+            interfaceConfig += `switchport mode access\n`;
+
+            if (desc.includes("voice") && desc.includes("data")) {
+                // Voice + Data
+                interfaceConfig += `switchport access vlan ${accessVlan}\n`;
+                interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
+
+            } else if (desc.includes("voice")) {
+                // Voice Only
+                interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
+
             } else {
-                interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nno shutdown\n`
+                // Data or CCTV
+                interfaceConfig += `switchport access vlan ${accessVlan}\n`;
             }
+
+            // Common authentication block for all ports now
+            interfaceConfig += `authentication event fail retry 2 action next-method\n`;
+            interfaceConfig += `authentication event server dead action authorize vlan ${accessVlan}\n`;
+            interfaceConfig += `authentication event server dead action authorize voice\n`;
+            interfaceConfig += `authentication event server alive action reinitialize\n`;
+            interfaceConfig += `authentication host-mode multi-domain\n`;
+            interfaceConfig += `authentication order mab dot1x\n`;
+            interfaceConfig += `authentication priority dot1x mab\n`;
+            interfaceConfig += `authentication port-control auto\n`;
+            interfaceConfig += `authentication violation restrict\n`;
+            interfaceConfig += `mab\n`;
+            interfaceConfig += `device-tracking attach-policy ise-tracking\n`;
+            interfaceConfig += `dot1x pae authenticator\n`;
+            interfaceConfig += `authentication open\n`;
+            interfaceConfig += `ip device tracking maximum 10\n`;
+            interfaceConfig += `no shutdown\n\n`;
         });
+
+
+
         if (!interfaceConfig) {
             return res.json({ msg: "Unable to make interface configuration", status: false })
         }
@@ -254,15 +299,15 @@ export const configurationDetails = async (req, res) => {
             msgs = { msg: "Device configured successfully.", status: true }
         } else {
             msgs = { msg: "Unable to configured device.", status: false }
-            return res.json(msgs)
         }
         let details = { ...data, config: interfaceConfig, createdAt: new Date(), updatedAt: new Date() }
         console.log("details", details, "details")
         let saveData = await db_connect.collection('ms_interfaceConfig').insertOne(details);
+        return res.json(msgs)
 
         // check device exist in ISE or not
-        let iseNetworkDevice = await networkDevice(data?.device)
-        return res.send(iseNetworkDevice)
+        // let iseNetworkDevice = await networkDevice(data?.device)
+        // return res.send(iseNetworkDevice)
     } catch (err) {
         console.log(`Error in configuration:${err}`)
         logger.error({ msg: `Error in configurationDetails:${err}`, status: false })
@@ -387,8 +432,8 @@ export const tacacsAndRadiusConf = async (req, res) => {
             dnac: data?.dnacUrl,
             device: data?.device
         }
-        return res.json({ msg: "configured Created successfully.", status: true,Data }
-)
+        return res.json({ msg: "configured Created successfully.", status: true, Data }
+        )
         // let dnacData = {
         //     config: config,
         //     dnac: data?.dnacUrl,
@@ -534,7 +579,7 @@ export const configureDeviceInISE = async (req, res) => {
                 ]
             }
         };
-        
+
         // const deviceData = {
         //     NetworkDevice: {
         //         name: "Test-01",
@@ -629,7 +674,7 @@ export const convertExcelToJSON = async (req, res) => {
 
         let outputData = {};
 
-        for (let i = 0; i < sheetNames.length-1; i++) {
+        for (let i = 0; i < sheetNames.length - 1; i++) {
             const sheet = workbook.Sheets[sheetNames[0]];
             let jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
 
@@ -682,5 +727,58 @@ export const pnpDatafromDB = async (req, res) => {
     }
 }
 
-// convertExcelToJSON()
+
+
+// export const convertExcelToJSON2 = async (req, res) => {
+//     try {
+//         const db_connect = dbo && dbo.getDb();
+//         const __dirname = path.resolve();
+//         const filePath = path.join(__dirname, 'PE_Devices_Day0 1.xlsx');
+
+//         const workbook = xlsx.readFile(filePath);
+//         const sheetNames = workbook.SheetNames;
+        
+//         let outputData = {};
+        
+//         for (let i = 0; i < sheetNames.length; i++) {
+//             const sheet = workbook.Sheets[sheetNames[i]];
+//             let jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
+            
+//             jsonData = jsonData.map(row => {
+//                 row = normalizeKeys2(row);
+//                 return {
+//                     ...row,
+//                     // mgmt_subnet: row['mgmt_subnet'] ?? '10.138.132.128/25',
+//                     // reserved_seed_ports: row['reserved_seed_ports'] ?? 'Need to Reserve Two ports one from primary and one from secondary'
+//                 };
+//             });
+            
+//             outputData[sheetNames[i]] = jsonData;
+//         }
+        
+//         if (Object.keys(outputData).length !== 0) {
+//             const result =  await db_connect.collection('ms_pnp_data').insertOne(outputData);
+//             console.log('✅ Excel converted and single document inserted into MongoDB.');
+//             return res.status(200).json({ success: true, message: "Data inserted as single document", insertedId: result.insertedId });
+//         } else {
+//             console.log("⚠️ No data found in Excel");
+//             return res.status(400).json({ success: false, message: "No data found in Excel" });
+//         }
+        
+//     } catch (err) {
+//         console.error("❌ Error in convertExcelToJSON:", err);
+//         return res.status(500).json({ success: false, message: 'Internal Server Error' });
+//     }
+// };
+
+// function normalizeKeys2(row) {
+//     const normalized = {};
+//     Object.keys(row).forEach(key => {
+//         const cleanKey = key.trim().replace(/\s+/g, '_').toLowerCase();
+//         normalized[cleanKey] = row[key];
+//     });
+//     return normalized;
+// }
+
+
 

@@ -1,5 +1,5 @@
 import express from "express";
-import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot, getPnpDevices, getFloorValue, getTemplatesByFloor, getDeviceDetails} from "../controller/Onboarding.js";
+import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot, getPnpDevices, getFloorValue, getTemplatesByFloor, getDeviceDetails, getAllLocations, getDevicesByLocation, getDeviceInfo} from "../controller/Onboarding.js";
 // import { authenticate, authorizeRoles} from '../../auth.js';
 // import { dnacDataDetail, insertDeviceInDnac, onboardDeviceDetails } from "../controller/Onboarding_Portal/Onboarding.js";
 
@@ -20,6 +20,9 @@ router.get('/getPnpDevices', getPnpDevices);
 router.get('/getFloorList',getFloorValue)
 router.get('/getTemplatesByFloor',getTemplatesByFloor);
 router.get('/getDeviceDetails',getDeviceDetails);
+router.get('/locations',getAllLocations);
+router.get('/devicesByLocation',getDevicesByLocation);
+router.get('/device-details',getDeviceInfo);
 
 // router.post('/postPnPDeviceSiteClaim',postPnPDeviceSiteClaim);
 

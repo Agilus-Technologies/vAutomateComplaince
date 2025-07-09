@@ -1048,6 +1048,136 @@ export const getDeviceDetails = async (req, res) => {
 
 
 
+export const getAllLocations = async (req, res) => {
+    try {
+        const db = dbo && dbo.getDb();
+        const collection = db.collection('ms_pnp_data');
+
+        const document = await collection.findOne({name: 'DAY0_devices'});
+        if (!document) {
+            return res.status(404).json({ success: false, message: 'No data found' });
+        }
+
+        let locations = new Set();
+
+        for (const sheet in document) {
+            const rows = document[sheet];
+            if (Array.isArray(rows)) {
+                rows.forEach(r => {
+                    if (r.region) {
+                        locations.add(r.region.trim());
+                    }
+                });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            locations: [...locations]
+        });
+
+    } catch (error) {
+        console.error("Error in getAllLocations:", error);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
+
+export const getDevicesByLocation = async (req, res) => {
+    const { location } = req.query;
+
+    if (!location) {
+        return res.status(400).json({ success: false, message: "Location query param is required" });
+    }
+
+    try {
+        const db = dbo && dbo.getDb();
+        const collection = db.collection('ms_pnp_data');
+
+        const document = await collection.findOne({name: 'DAY0_devices'});
+        if (!document) {
+            return res.status(404).json({ success: false, message: 'No data found' });
+        }
+
+        let devices = [];
+
+        for (const sheet in document) {
+            const rows = document[sheet];
+            if (Array.isArray(rows)) {
+                const filtered = rows.filter(r => 
+                    r.region?.trim().toLowerCase() === location.trim().toLowerCase() &&
+                    r.pe_ip && r.pe_hostname
+                );
+                devices = devices.concat(filtered.map(r => ({
+                    peIP: r.pe_ip,
+                    hostname: r.pe_hostname
+                })));
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            location,
+            // count: devices.length,
+            devices
+        });
+
+    } catch (error) {
+        console.error("Error in getDevicesByLocation:", error);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
+
+export const getDeviceInfo = async (req, res) => {
+    const { pe_ip, hostname } = req.query;
+
+    if (!pe_ip && !hostname) {
+        return res.status(400).json({ success: false, message: "pe_ip or hostname is required" });
+    }
+
+    try {
+        const db = dbo && dbo.getDb();
+        const collection = db.collection('ms_pnp_data');
+
+        const document = await collection.findOne({name: 'DAY0_devices'}, { sort: { _id: -1 } });
+
+        if (!document) {
+            return res.status(404).json({ success: false, message: 'No data found' });
+        }
+
+        for (const sheet in document) {
+            const rows = document[sheet];
+            if (Array.isArray(rows)) {
+                const found = rows.find(r => {
+                    return (pe_ip && r.pe_ip === pe_ip) || (hostname && r.hostname === hostname);
+                });
+
+                if (found) {
+                    return res.status(200).json({
+                        success: true,
+                        data: {
+                            region: found.region ,
+                            site: found.site || '',
+                            floor: found.list_of_floor ,
+                            "PE": found.pe_hostname || null,
+                            "IP": found.pe_ip || null,
+                            "Serial": found.serial_no || 'FGL2352LH52',
+                            vlan: found.vlan,
+                            reserved_seed_ports: found.reserved_seed_ports || null
+                        }
+                    });
+                }
+            }
+        }
+
+        return res.status(404).json({ success: false, message: "Device not found" });
+
+    } catch (error) {
+        console.error("Error in getDeviceDetails:", error);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    } 
+};
 
 
 
