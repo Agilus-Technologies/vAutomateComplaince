@@ -77,8 +77,8 @@ app.use(function (req, res, next) {
 });
 
 // Routes
-app.use('/api/v1/onboard', onboardingRoute);
-app.use('/api/v1/afterOnboard', afterOnboading);
+app.use('/dayN/v1', onboardingRoute);
+// app.use('/dayN/v1', afterOnboading);
 
 // MongoDB connection
 const connectToDb = async () => {

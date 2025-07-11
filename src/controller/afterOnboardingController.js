@@ -15,27 +15,56 @@ import path from "path"
 
 
 
+// export const deviceDetails = async (req, res) => {
+//     try {
+//         const db_connect = dbo && dbo.getDb();
+//         let setUpDetails = await db_connect.collection('ms_device').find({ "source": "DNAC" }).toArray();
+//         if (!setUpDetails || setUpDetails?.length == 0) {
+//             let errorMsg = { data: [], msg: "Unable to get dnac data.", status: false }
+//             logger.error(errorMsg)
+//             return res.send(errorMsg)
+//         }
+//         res.json({
+//             data: setUpDetails,
+//             msg: "Data get successfully",
+//             status: true
+//         })
+//     } catch (err) {
+//         let errorMsg = { data: [], msg: `Error msg in deviceDetails:${err}`, status: false }
+//         logger.error(errorMsg)
+//         console.log(errorMsg)
+//         return res.send(errorMsg)
+//     }
+// };
+
 export const deviceDetails = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-        let setUpDetails = await db_connect.collection('ms_device').find({ "source": "DNAC" }).toArray();
-        if (!setUpDetails || setUpDetails?.length == 0) {
-            let errorMsg = { data: [], msg: "Unable to get dnac data.", status: false }
-            logger.error(errorMsg)
-            return res.send(errorMsg)
-        }
-        res.json({
-            data: setUpDetails,
-            msg: "Data get successfully",
-            status: true
-        })
+
+        let claimedDevices = await db_connect
+            .collection("onboardingdata")
+            .find({ pnpClaim: true })
+            .toArray();
+
+        claimedDevices.forEach(device => {
+            device.source_url = device.dnac || "";
+            device.managementIpAddress = device.device || "";
+            device.serial_number = device.serialNo || "";
+        });
+
+        return res.json({
+            msg: "Claimed devices fetched successfully.",
+            status: true,
+            data: claimedDevices
+        });
     } catch (err) {
-        let errorMsg = { data: [], msg: `Error msg in deviceDetails:${err}`, status: false }
-        logger.error(errorMsg)
-        console.log(errorMsg)
-        return res.send(errorMsg)
+        const errorMsg = { msg: `Error in getClaimedDevices: ${err}`, status: false };
+        logger.error(errorMsg);
+        console.log(errorMsg);
+        return res.status(500).json(errorMsg);
     }
 };
+
 
 export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
     try {
@@ -95,7 +124,9 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
 
 export const pingDevice = async (req, res) => {
     try {
-        let { ip, device, dnacUrl } = req.body
+        // let { ip, device, dnacUrl } = req.body
+        let { device, dnacUrl } = req.body;
+       let ip = device?.split(" ")[0]; // Extract IP from device string
         if (!ip || !device || !dnacUrl) {
             logger.error({ msg: "Unable to get ip,device or dnac url ", status: false })
             console.log({ msg: "Unable to get ip,device or dnac url ", status: false })
@@ -216,11 +247,280 @@ export const networkDevice = async (device) => {
     }
 };
 
+const generateInterfaceConfig = (interfaceLevel) => {
+    let interfaceConfig = "";
+
+    interfaceLevel.forEach((item) => {
+        const intf = item?.interface;
+        const descRaw = item?.port_description || "";
+        const desc = descRaw.toLowerCase();
+        const accessVlan = item?.access_vlan || "X";
+        const voiceVlan = item?.voice_vlan || "X";
+
+        interfaceConfig += `interface ${intf}\n`;
+        interfaceConfig += `description ${descRaw}\n`;
+
+        if (desc.includes("USER DATA & VOICE PORT")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport voice vlan ${voiceVlan}
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("user data")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport voice vlan ${voiceVlan}
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("Stagging")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport nonegotiate
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("Printer")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport nonegotiate
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("Voice")) {
+            interfaceConfig += `
+switchport mode access
+switchport voice vlan ${voiceVlan}
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("CCTV")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport nonegotiate
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("ACT")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport nonegotiate
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("BMS")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+switchport nonegotiate
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else if (desc.includes("CMS")) {
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+
+        } else {
+            // Default/fallback config if no keyword matched
+            interfaceConfig += `
+switchport access vlan ${accessVlan}
+switchport mode access
+device-tracking attach-policy ise-tracking
+authentication event fail action next-method
+authentication event server dead action authorize vlan ${accessVlan}
+authentication event server dead action authorize voice
+authentication event server alive action reinitialize
+authentication host-mode multi-domain
+authentication order mab dot1x
+authentication priority dot1x mab
+authentication port-control auto
+authentication violation restrict
+mab
+dot1x pae authenticator
+storm-control broadcast level 3.00
+storm-control multicast level 3.00
+spanning-tree portfast
+spanning-tree bpduguard enable
+storm-control action trap
+no shutdown
+`.trim();
+        }
+
+        interfaceConfig += `\n\n`; // gap between interface blocks
+    });
+
+    return interfaceConfig.trim();
+};
+
+
 export const configurationDetails = async (req, res) => {
     try {
         let data = req.body
         console.log("data", req.body)
-        const db_connect = dbo && dbo.getDb();
+        // const db_connect = dbo && dbo.getDb();
         if (!db_connect) {
             return res.send({ msg: "Unable to connect to database.", status: false })
         }
@@ -238,48 +538,51 @@ export const configurationDetails = async (req, res) => {
         //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nno shutdown\n`
         //     }
         // });
-        interfaceLevel.forEach((item) => {
-            const intf = item?.interface;
-            const rawDesc = item?.port_description || '';
-            const desc = rawDesc.toLowerCase();
-            const accessVlan = item?.access_vlan;
-            const voiceVlan = item?.voice_vlan;
+        // interfaceLevel.forEach((item) => {
+        //     const intf = item?.interface;
+        //     const rawDesc = item?.port_description || '';
+        //     const desc = rawDesc.toLowerCase();
+        //     const accessVlan = item?.access_vlan;
+        //     const voiceVlan = item?.voice_vlan;
 
-            interfaceConfig += `interface ${intf}\n`;
-            interfaceConfig += `description "${rawDesc}"\n`;
-            interfaceConfig += `switchport mode access\n`;
+        //     interfaceConfig += `interface ${intf}\n`;
+        //     interfaceConfig += `description "${rawDesc}"\n`;
+        //     interfaceConfig += `switchport mode access\n`;
 
-            if (desc.includes("voice") && desc.includes("data")) {
-                // Voice + Data
-                interfaceConfig += `switchport access vlan ${accessVlan}\n`;
-                interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
+        //     if (desc.includes("voice") && desc.includes("data")) {
+        //         // Voice + Data
+        //         interfaceConfig += `switchport access vlan ${accessVlan}\n`;
+        //         interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
 
-            } else if (desc.includes("voice")) {
-                // Voice Only
-                interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
+        //     } else if (desc.includes("voice")) {
+        //         // Voice Only
+        //         interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
 
-            } else {
-                // Data or CCTV
-                interfaceConfig += `switchport access vlan ${accessVlan}\n`;
-            }
+        //     } else {
+        //         // Data or CCTV
+        //         interfaceConfig += `switchport access vlan ${accessVlan}\n`;
+        //     }
 
-            // Common authentication block for all ports now
-            interfaceConfig += `authentication event fail retry 2 action next-method\n`;
-            interfaceConfig += `authentication event server dead action authorize vlan ${accessVlan}\n`;
-            interfaceConfig += `authentication event server dead action authorize voice\n`;
-            interfaceConfig += `authentication event server alive action reinitialize\n`;
-            interfaceConfig += `authentication host-mode multi-domain\n`;
-            interfaceConfig += `authentication order mab dot1x\n`;
-            interfaceConfig += `authentication priority dot1x mab\n`;
-            interfaceConfig += `authentication port-control auto\n`;
-            interfaceConfig += `authentication violation restrict\n`;
-            interfaceConfig += `mab\n`;
-            interfaceConfig += `device-tracking attach-policy ise-tracking\n`;
-            interfaceConfig += `dot1x pae authenticator\n`;
-            interfaceConfig += `authentication open\n`;
-            interfaceConfig += `ip device tracking maximum 10\n`;
-            interfaceConfig += `no shutdown\n\n`;
-        });
+        //     // Common authentication block for all ports now
+        //     interfaceConfig += `authentication event fail retry 2 action next-method\n`;
+        //     interfaceConfig += `authentication event server dead action authorize vlan ${accessVlan}\n`;
+        //     interfaceConfig += `authentication event server dead action authorize voice\n`;
+        //     interfaceConfig += `authentication event server alive action reinitialize\n`;
+        //     interfaceConfig += `authentication host-mode multi-domain\n`;
+        //     interfaceConfig += `authentication order mab dot1x\n`;
+        //     interfaceConfig += `authentication priority dot1x mab\n`;
+        //     interfaceConfig += `authentication port-control auto\n`;
+        //     interfaceConfig += `authentication violation restrict\n`;
+        //     interfaceConfig += `mab\n`;
+        //     interfaceConfig += `device-tracking attach-policy ise-tracking\n`;
+        //     interfaceConfig += `dot1x pae authenticator\n`;
+        //     interfaceConfig += `authentication open\n`;
+        //     interfaceConfig += `ip device tracking maximum 10\n`;
+        //     interfaceConfig += `no shutdown\n\n`;
+        // });
+        const configOutput = generateInterfaceConfig(req.body.interfaceLevel);
+        console.log(configOutput); // final interface config
+
 
 
 
@@ -781,4 +1084,31 @@ export const pnpDatafromDB = async (req, res) => {
 // }
 
 
+export const getRadiusConfiguration = async (req, res) => {
+    try {
+        const radiusConfig = [
+            // "ARUBA WAP PORT",
+            // "Cisco WAP",
+            "USER DATA & VOICE PORT",
+            "USER DATA PORT",
+            "Stagging Area PORT",
+            "Printer Port",
+            "Voice PORT",
+            "CCTV Port",
+            "ACT Port",
+            "BMS Port",
+            "CMS Port"
+        ];
+
+        return res.status(200).json({
+            success: true,
+            configType: "Radius Configuration",
+            ports: radiusConfig
+        });
+
+    } catch (error) {
+        console.error("Error in getRadiusConfiguration:", error);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
 

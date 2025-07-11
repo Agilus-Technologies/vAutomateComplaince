@@ -11,6 +11,8 @@ import axios from "axios";
 import onboardingModel from '../model/onboardingModel.js';
 // import similarity from 'string-similarity';
 import semver from 'semver';
+import { ObjectId } from "mongodb";
+
 
 
 
@@ -137,7 +139,10 @@ export const interfaces = async (switchUUID, dnacUrl, token) => {
 
 export const dnacDeviceInterfaces = async (req, res) => {
     try {
-        const { dnacUrl, device } = req.body;
+        // const { dnacUrl, device } = req.body;
+        let { dnacUrl, device } = req.body;
+         device = device?.split(" ")[0]; // "10.28.33.7" from "10.28.33.7 (HTAINHYD06XXXCS001)"
+
         let commanCredential = await commonCredentials(device, dnacUrl)
         const { token, cli_command_url, AUTH_API_URL, switchUUID, dnacCredentials } = commanCredential
         let interfaceDetails = await interfaces(switchUUID, dnacUrl, token)
@@ -160,137 +165,153 @@ export const dnacDeviceInterfaces = async (req, res) => {
 };
 
 
+// old code of onboard configration
+// const configuration = (datass) => {
+//     if (datass.dayOnboardingMethod.includes("Access Switch")) {
+//         let config = `interface ${datass.interfaceID}\ndescription ${datass.otherParameter}\nswitchport mode trunk\nswitchport trunk allowed vlan ${datass.vlanID}\nno shutdown`
+//         return config
+//     } else {
+//         let config = `interface ${datass.interfaceID}\ndescription ${datass.otherParameter}\nswitchport mode trunk\nno shutdown`
+//         return config
+//     }
+
+// };
+
+// export const configDevicesInDnac = async (req, res) => {
+//     try {
+//         const db_connect = dbo && dbo.getDb();
+//         const datass = req.body
+//         if (Object.keys(datass).length == 0 || datass.interfaceID == "" || datass.otherParameter == "") {
+//             return res.json({
+//                 msg: "Unable to get data from user.interface id and otherParameter keys are mandatory.",
+//                 status: false
+
+//             })
+//         }
+
+//         let config = configuration(datass)
+//         if (!config || config == "") {
+//             return res.json({
+//                 msg: "Unable to make config.",
+//                 status: false
+//             })
+//         }
+//         datass["config"] = config
+//         datass["createdAt"] = new Date()
+//         datass["updatedAt"] = new Date()
+//         let saveData = await db_connect.collection("onboardingdata").insertOne(datass)
+
+//         let excute_templte = await execute_templates(datass)
+//         // let excute_templte = await execute_templates(datass)
+//         let msgs = {};
+//         if (excute_templte == "SUCCESS") {
+//             msgs = { msg: "Device configured successfully.", status: true }
+//         } else {
+//             msgs = { msg: "Unable to configured device.", status: false }
+//         }
+//         return res.json(msgs)
+//     } catch (err) {
+//         let errorMsg = { msg: `Error msg in configDevicesInDnac:${err}`, status: false }
+//         logger.error(errorMsg)
+//         console.log(errorMsg)
+//     }
+// };
+
 
 const configuration = (datass) => {
-    if (datass.dayOnboardingMethod.includes("Access Switch")) {
-        let config = `interface ${datass.interfaceID}\ndescription ${datass.otherParameter}\nswitchport mode trunk\nswitchport trunk allowed vlan ${datass.vlanID}\nno shutdown`
-        return config
-    } else {
-        let config = `interface ${datass.interfaceID}\ndescription ${datass.otherParameter}\nswitchport mode trunk\nno shutdown`
-        return config
-    }
+    let configLines = [];
 
+    if (!datass.cleanedData || datass.cleanedData.length === 0) return "";
+
+    datass.cleanedData.forEach((row) => {
+        const iface = row.interfaceID;
+        const vlan = row.vlanID;
+        const desc = datass.otherParameter || "Configured via automation";
+        let config = "";
+        if (datass.dayOnboardingMethod.includes("Access Switch")) {
+           config = `interface ${iface}
+description ${desc}
+switchport access vlan ${vlan}
+switchport mode access
+no shutdown`;   
+        } else {
+           config = `interface ${iface}
+description ${desc}
+switchport mode trunk
+switchport trunk allowed vlan ${vlan}
+no shutdown`;
+}
+        configLines.push(config);
+    });
+
+    return configLines.join("\n\n");
 };
 
 export const configDevicesInDnac = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-        const datass = req.body
-        if (Object.keys(datass).length == 0 || datass.interfaceID == "" || datass.otherParameter == "") {
-            return res.json({
-                msg: "Unable to get data from user.interface id and otherParameter keys are mandatory.",
-                status: false
+        let datass = req.body;
 
-            })
+        // Validation
+        if (!datass.cleanedData || datass.cleanedData.length === 0) {
+            return res.json({
+                msg: "Missing required 'rows' data.",
+                status: false,
+            });
         }
 
-        let config = configuration(datass)
-        if (!config || config == "") {
-            return res.json({
-                msg: "Unable to make config.",
-                status: false
-            })
-        }
-        datass["config"] = config
-        datass["createdAt"] = new Date()
-        datass["updatedAt"] = new Date()
-        let saveData = await db_connect.collection("onboardingdata").insertOne(datass)
+        const validRows = datass.cleanedData.every(
+            (row) => row.interfaceID && row.vlanID
+        );
 
-        let excute_templte = await execute_templates(datass)
-        // let excute_templte = await execute_templates(datass)
+        if (!validRows) {
+            return res.json({
+                msg: "Each row must have 'interfaceID' and 'vlanID'.",
+                status: false,
+            });
+        }
+
+        // Extract IP and hostname from device string
+        const deviceIp = datass.device?.split(" ")[0] || "";
+        const hostnameMatch = datass.device?.match(/\((.*?)\)/);
+        const hostname = hostnameMatch ? hostnameMatch[1] : "";
+
+        // Update values
+        datass.device = deviceIp;
+        datass.hostname = hostname;
+        // Generate configuration
+        let config = configuration(datass);
+        if (!config || config === "") {
+            return res.json({
+                msg: "Unable to generate config.",
+                status: false,
+            });
+        }
+
+        datass["config"] = config;
+        datass["pnpClaim"] = false; 
+        datass["createdAt"] = new Date();
+        datass["updatedAt"] = new Date();
+
+        // Save data
+        await db_connect.collection("onboardingdata").insertOne(datass);
+
+        // Execute templates
+        let excute_templte = await execute_templates(datass);
         let msgs = {};
-        if (excute_templte == "SUCCESS") {
-            msgs = { msg: "Device configured successfully.", status: true }
+
+        if (excute_templte === "SUCCESS") {
+            msgs = { msg: "Device configured successfully.", status: true };
         } else {
-            msgs = { msg: "Unable to configured device.", status: false }
+            msgs = { msg: "Unable to configure device.", status: false };
         }
-        return res.json(msgs)
+
+        return res.json(msgs);
     } catch (err) {
-        let errorMsg = { msg: `Error msg in configDevicesInDnac:${err}`, status: false }
-        logger.error(errorMsg)
-        console.log(errorMsg)
-    }
-};
-
-export const getUnClaimedDevice = async (req, res) => {
-    try {
-        const { dnacUrl } = req.body;
-
-        if (!dnacUrl) {
-            return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
-        }
-
-        // Hardcoded IP for testing (replace with actual source)
-        const dummyDeviceIp = "";
-        const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
-
-        if (!credentialsData?.token) {
-            return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
-        }
-        const limit = 50;
-        let offset = 0;
-        let allDevices = [];
-
-        while (true) {
-            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
-            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
-            const hostName = new URL(dnacUrl).hostname;
-            const httpsAgent = new https.Agent({
-                rejectUnauthorized: false
-            });
-            const options = {
-                hostname: hostName,
-                path: urlPath,
-                method: "GET",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-Auth-Token": credentialsData.token
-                },
-                rejectUnauthorized: false, // Use only in trusted environments with self-signed certs
-                // httpsAgent: httpsAgent
-            };
-
-            const result = await new Promise((resolve, reject) => {
-                const req = https.request(options, (res) => {
-                    let data = [];
-
-                    res.on('data', chunk => data.push(chunk));
-                    res.on('end', () => {
-                        try {
-                            const responseBody = Buffer.concat(data).toString();
-                            const parsed = JSON.parse(responseBody);
-                            resolve(parsed || []);
-                        } catch (e) {
-                            reject({ msg: "Error parsing response from DNAC", error: e });
-                        }
-                    });
-                });
-
-                req.on('error', (e) => reject({ msg: "HTTPS request failed", error: e.message }));
-                req.end();
-            });
-
-
-            allDevices.push(...result);
-            offset += limit;
-            if (result.length < limit) break;
-        }
-
-        const formatted = allDevices.map(device => ({
-            id: device.id,
-            ...device.deviceInfo,
-            ...device.progress
-        }));
-
-        return res.status(200).json({
-            status: true,
-            data: formatted
-        });
-
-
-    } catch (err) {
-        console.error("Error in getUnClaimedDevice:", err);
-        return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
+        let errorMsg = { msg: `Error msg in configDevicesInDnac: ${err}`, status: false };
+        logger.error(errorMsg);
+        console.log(errorMsg);
+        return res.json(errorMsg);
     }
 };
 
@@ -304,49 +325,108 @@ export const getUnClaimedDevice = async (req, res) => {
 
 //         // Hardcoded IP for testing (replace with actual source)
 //         const dummyDeviceIp = "";
-
 //         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
 
 //         if (!credentialsData?.token) {
 //             return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
 //         }
-//         let offset = 1
-//         let limit = 200
-//         let allData=[]
-//         let fetchStatus=true
-//         while(fetchStatus){
-//             const urlPath = `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
+//         const limit = 50;
+//         let offset = 0;
+//         let allDevices = [];
+
+//         while (true) {
+//             const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
+//             // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
+//             const hostName = new URL(dnacUrl).hostname;
 //             const httpsAgent = new https.Agent({
 //                 rejectUnauthorized: false
 //             });
 //             const options = {
-//                 url: urlPath,
+//                 hostname: hostName,
+//                 path: urlPath,
 //                 method: "GET",
 //                 headers: {
 //                     "Content-Type": "application/json",
 //                     "X-Auth-Token": credentialsData.token
 //                 },
-//                 httpsAgent: httpsAgent
+//                 rejectUnauthorized: false, // Use only in trusted environments with self-signed certs
+//                 // httpsAgent: httpsAgent
 //             };
-//             const response = await axios.request(options);
-//             const devices = response.data || [];
-//             allData.push(devices)
-//             if (response.data < limit) {
-//                 fetchStatus = false; // No more data left to fetch
-//             } else {
-//                 offset += limit;
-//             }
-//         }
-//             console.log("response", allData)
 
-//         // const urlPath = `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device`;
-//         return res.status(200).json({ status: true, data:allData });
+//             const result = await new Promise((resolve, reject) => {
+//                 const req = https.request(options, (res) => {
+//                     let data = [];
+
+//                     res.on('data', chunk => data.push(chunk));
+//                     res.on('end', () => {
+//                         try {
+//                             const responseBody = Buffer.concat(data).toString();
+//                             const parsed = JSON.parse(responseBody);
+//                             resolve(parsed || []);
+//                         } catch (e) {
+//                             reject({ msg: "Error parsing response from DNAC", error: e });
+//                         }
+//                     });
+//                 });
+
+//                 req.on('error', (e) => reject({ msg: "HTTPS request failed", error: e.message }));
+//                 req.end();
+//             });
+
+
+//             allDevices.push(...result);
+//             offset += limit;
+//             if (result.length < limit) break;
+//         }
+
+//         const formatted = allDevices.map(device => ({
+//             id: device.id,
+//             ...device.deviceInfo,
+//             ...device.progress
+//         }));
+
+//         return res.status(200).json({
+//             status: true,
+//             data: formatted
+//         });
+
 
 //     } catch (err) {
 //         console.error("Error in getUnClaimedDevice:", err);
 //         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
 //     }
 // };
+
+export const getUnClaimedDevice = async (req, res) => {
+    try {
+        const { dnacUrl } = req.body;
+
+        if (!dnacUrl) {
+            return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
+        }
+        const db_connect = dbo && dbo.getDb();
+        if (!db_connect) {
+            return res.json({ msg: "Database connection failed", status: false });
+        }
+
+       const devices = await db_connect
+            .collection("onboardingdata")
+            .find({ pnpClaim: false, dnac: dnacUrl })
+            .toArray();
+
+        return res.json({
+            msg: "Unclaimed devices fetched successfully.",
+            status: true,
+            data: devices
+        });
+
+
+    } catch (err) {
+        console.error("Error in getUnClaimedDevice:", err);
+        return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
+    }
+};
+
 
 
 export const getDnacSites = async (req, res) => {
@@ -546,13 +626,15 @@ export const saveClaimSiteData = async (req, res) => {
             return res.json({ msg: "Database connection failed", status: false });
         }
 
-        let getTemplateID = await getTemplate(payload.dnacUrl)
-        console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
-        let filterTemplate;
-        if (getTemplateID) {
-            getTemplateID = JSON.parse(getTemplateID)
-            filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
-        }
+        let getTemplateId = await db_connect.collection('ms_dnac_template_id').findOne({"dnac_url": payload.dnacUrl,software_type:"IOS-XE"});
+
+        // let getTemplateID = await getTemplate(payload.dnacUrl)
+        // console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
+        // let filterTemplate;
+        // if (getTemplateID) {
+        //     getTemplateID = JSON.parse(getTemplateID)
+        //     filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
+        // }
         // if (!filterTemplate || filterTemplate.length == 0) {
         //     return res.json({ msg: "Unable to find template from dnac", status: false })
         // }
@@ -605,7 +687,7 @@ export const saveClaimSiteData = async (req, res) => {
             "siteId": payload?.site,
             "type": "Default",
             "configInfo": {
-                "configId": filterTemplate && filterTemplate[0]?.templateId || "0514a78a-67d5-405b-846d-8ba43610e6a9",
+                "configId": getTemplateId && getTemplateId?.template_id || "0514a78a-67d5-405b-846d-8ba43610e6a9",
                 "configParameters": [
                     {
                         "key": "vtpversion",
@@ -699,11 +781,15 @@ export const saveClaimSiteData = async (req, res) => {
             claimStatus: "",
             createdAt: timestamp,
             updatedAt: timestamp,
+            dayNBoarding:false
         };
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
         //site-claim api
         let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
+        let ObjectId = new ObjectId(payload.id);
+        await db_connect.collection("onboardingdata").findOneAndUpdate({ _id:  ObjectId}, { $set: { pnpClaim: true } },{ returnDocument: "after" });
+
         console.log("pnpSiteDeviceClaim", pnpSiteDeviceClaim);
         // let updateData = await db_connect.collection("siteclaimdata").update({ "_id": ObjectId("682330e4d861028d53209239") },{ $set:{ "claimStatus": "success"}});
         return res.status(200).json({ msg: pnpSiteDeviceClaim?.response || "", status: true });
@@ -1130,17 +1216,22 @@ export const getDevicesByLocation = async (req, res) => {
 
 
 export const getDeviceInfo = async (req, res) => {
-    const { pe_ip, hostname } = req.query;
+    let { pe_ip, hostname } = req.query;
 
     if (!pe_ip && !hostname) {
         return res.status(400).json({ success: false, message: "pe_ip or hostname is required" });
     }
 
     try {
+        // ✅ Clean the pe_ip if it contains anything extra (e.g. "10.28.33.7 (hostname)")
+        if (pe_ip) {
+            pe_ip = pe_ip.split(" ")[0].trim(); // gets only the IP part before the space
+        }
+
         const db = dbo && dbo.getDb();
         const collection = db.collection('ms_pnp_data');
 
-        const document = await collection.findOne({name: 'DAY0_devices'}, { sort: { _id: -1 } });
+        const document = await collection.findOne({ name: 'DAY0_devices' }, { sort: { _id: -1 } });
 
         if (!document) {
             return res.status(404).json({ success: false, message: 'No data found' });
@@ -1157,9 +1248,9 @@ export const getDeviceInfo = async (req, res) => {
                     return res.status(200).json({
                         success: true,
                         data: {
-                            region: found.region ,
+                            region: found.region,
                             site: found.site || '',
-                            floor: found.list_of_floor ,
+                            floor: found.list_of_floor,
                             "PE": found.pe_hostname || null,
                             "IP": found.pe_ip || null,
                             "Serial": found.serial_no || 'FGL2352LH52',
@@ -1176,8 +1267,9 @@ export const getDeviceInfo = async (req, res) => {
     } catch (error) {
         console.error("Error in getDeviceDetails:", error);
         return res.status(500).json({ success: false, message: "Internal Server Error" });
-    } 
+    }
 };
+
 
 
 

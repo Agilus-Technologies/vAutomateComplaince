@@ -322,7 +322,9 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
 
 export const execute_templates = async (item) => {
     try {
-        let template_id = "48967f32-a1de-46a0-a407-84197a6064b8"
+        let db_connect = dbo && dbo.getDb()
+        let getTemplateId = await db_connect.collection('ms_dnac_template_id').findOne({"dnac_url": item.dnac,software_type:"IOS-XE"});
+        let template_id = getTemplateId?.template_id;
         let credData = await commonCredentials(item.device, item.dnac);
         const { token, deploy_temp_url, temp_deploy_status_url, switchUUID, dnacCredentials } = credData;
         if (token == "") {
@@ -410,7 +412,7 @@ export const execute_templates = async (item) => {
         return deployment_id;
 
     } catch (error) {
-        console.log("Error: Request failed with status", response.status);
+        console.log("Error: Request failed with status", error?.message || error);
         return { msg: `Error in excute_template ${error.message}`, status: false };
     }
 };
