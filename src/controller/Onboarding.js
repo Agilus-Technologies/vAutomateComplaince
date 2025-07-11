@@ -315,88 +315,6 @@ export const configDevicesInDnac = async (req, res) => {
     }
 };
 
-// export const getUnClaimedDevice = async (req, res) => {
-//     try {
-//         const { dnacUrl } = req.body;
-
-//         if (!dnacUrl) {
-//             return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
-//         }
-
-//         // Hardcoded IP for testing (replace with actual source)
-//         const dummyDeviceIp = "";
-//         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
-
-//         if (!credentialsData?.token) {
-//             return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
-//         }
-//         const limit = 50;
-//         let offset = 0;
-//         let allDevices = [];
-
-//         while (true) {
-//             const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
-//             // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
-//             const hostName = new URL(dnacUrl).hostname;
-//             const httpsAgent = new https.Agent({
-//                 rejectUnauthorized: false
-//             });
-//             const options = {
-//                 hostname: hostName,
-//                 path: urlPath,
-//                 method: "GET",
-//                 headers: {
-//                     "Content-Type": "application/json",
-//                     "X-Auth-Token": credentialsData.token
-//                 },
-//                 rejectUnauthorized: false, // Use only in trusted environments with self-signed certs
-//                 // httpsAgent: httpsAgent
-//             };
-
-//             const result = await new Promise((resolve, reject) => {
-//                 const req = https.request(options, (res) => {
-//                     let data = [];
-
-//                     res.on('data', chunk => data.push(chunk));
-//                     res.on('end', () => {
-//                         try {
-//                             const responseBody = Buffer.concat(data).toString();
-//                             const parsed = JSON.parse(responseBody);
-//                             resolve(parsed || []);
-//                         } catch (e) {
-//                             reject({ msg: "Error parsing response from DNAC", error: e });
-//                         }
-//                     });
-//                 });
-
-//                 req.on('error', (e) => reject({ msg: "HTTPS request failed", error: e.message }));
-//                 req.end();
-//             });
-
-
-//             allDevices.push(...result);
-//             offset += limit;
-//             if (result.length < limit) break;
-//         }
-
-//         const formatted = allDevices.map(device => ({
-//             id: device.id,
-//             ...device.deviceInfo,
-//             ...device.progress
-//         }));
-
-//         return res.status(200).json({
-//             status: true,
-//             data: formatted
-//         });
-
-
-//     } catch (err) {
-//         console.error("Error in getUnClaimedDevice:", err);
-//         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
-//     }
-// };
-
 export const getUnClaimedDevice = async (req, res) => {
     try {
         const { dnacUrl } = req.body;
@@ -404,20 +322,72 @@ export const getUnClaimedDevice = async (req, res) => {
         if (!dnacUrl) {
             return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
         }
-        const db_connect = dbo && dbo.getDb();
-        if (!db_connect) {
-            return res.json({ msg: "Database connection failed", status: false });
+
+        // Hardcoded IP for testing (replace with actual source)
+        const dummyDeviceIp = "";
+        const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
+
+        if (!credentialsData?.token) {
+            return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
+        }
+        const limit = 50;
+        let offset = 0;
+        let allDevices = [];
+
+        while (true) {
+            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
+            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
+            const hostName = new URL(dnacUrl).hostname;
+            const httpsAgent = new https.Agent({
+                rejectUnauthorized: false
+            });
+            const options = {
+                hostname: hostName,
+                path: urlPath,
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Auth-Token": credentialsData.token
+                },
+                rejectUnauthorized: false, // Use only in trusted environments with self-signed certs
+                // httpsAgent: httpsAgent
+            };
+
+            const result = await new Promise((resolve, reject) => {
+                const req = https.request(options, (res) => {
+                    let data = [];
+
+                    res.on('data', chunk => data.push(chunk));
+                    res.on('end', () => {
+                        try {
+                            const responseBody = Buffer.concat(data).toString();
+                            const parsed = JSON.parse(responseBody);
+                            resolve(parsed || []);
+                        } catch (e) {
+                            reject({ msg: "Error parsing response from DNAC", error: e });
+                        }
+                    });
+                });
+
+                req.on('error', (e) => reject({ msg: "HTTPS request failed", error: e.message }));
+                req.end();
+            });
+
+
+            allDevices.push(...result);
+            offset += limit;
+            if (result.length < limit) break;
         }
 
-       const devices = await db_connect
-            .collection("onboardingdata")
-            .find({ pnpClaim: false, dnac: dnacUrl })
-            .toArray();
+        const formatted = allDevices.map(device => ({
+            id: device.id,
+            ...device.deviceInfo,
+            ...device.progress
+        }));
 
-        return res.json({
-            msg: "Unclaimed devices fetched successfully.",
+        return res.status(200).json({
             status: true,
-            data: devices
+            data: formatted
         });
 
 
@@ -426,6 +396,37 @@ export const getUnClaimedDevice = async (req, res) => {
         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
     }
 };
+
+
+// export const getUnClaimedDevice = async (req, res) => {
+//     try {
+//         const { dnacUrl } = req.body;
+
+//         if (!dnacUrl) {
+//             return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
+//         }
+//         const db_connect = dbo && dbo.getDb();
+//         if (!db_connect) {
+//             return res.json({ msg: "Database connection failed", status: false });
+//         }
+
+//        const devices = await db_connect
+//             .collection("onboardingdata")
+//             .find({ pnpClaim: false, dnac: dnacUrl })
+//             .toArray();
+
+//         return res.json({
+//             msg: "Unclaimed devices fetched successfully.",
+//             status: true,
+//             data: devices
+//         });
+
+
+//     } catch (err) {
+//         console.error("Error in getUnClaimedDevice:", err);
+//         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
+//     }
+// };
 
 
 
