@@ -7,7 +7,8 @@ import axios from "axios";
 import { execute_templates } from '../helper/dnacHelper.js';
 import { commonCredentials } from '../helper/dnacHelper.js';
 import base64 from "base-64";
-import xlsx from "xlsx";
+import * as xlsx from 'xlsx';
+// import xlsx from "xlsx";
 import fs from "fs"
 import path from "path"
 
