@@ -138,7 +138,22 @@ export const getDnacToken = async (dnacCredentialsData) => {
         };
     }
 };
+async function getInstanceUuid(dnacUrl, ipAddress, token) {
+    try {
+        const url = `${dnacUrl}/dna/intent/api/v1/network-device/ip-address/${ipAddress}`;
+        const response = await axios.get(url, {
+            headers: {
+                'X-Auth-Token': token
+            }
+        });
 
+        const instanceUuid = response.data.response.instanceUuid;
+        return instanceUuid;
+    } catch (error) {
+        console.error('Error getting instanceUuid:', error.message);
+        throw new Error('Unable to fetch instanceUuid');
+    }
+}
 
 export const commonCredentials = async (ip = "", dnacUrl = "") => {
     try {
@@ -167,6 +182,13 @@ export const commonCredentials = async (ip = "", dnacUrl = "") => {
             apiEncriptionKey: dnacDetailss[0]?.secret_key || ""
         }
         let token = await getDnacToken(dnacCredentials);
+        if (!switchUUID && ip && dnacUrl) {
+            try {
+                switchUUID = await getInstanceUuid(dnacUrl, ip, token);
+            } catch (apiErr) {
+                console.log("Failed to fetch instanceUuid from DNAC API:", apiErr.message);
+            }
+        }
         await new Promise(resolve => setTimeout(resolve, 5000));
         if (Object.keys(token).length == 0 || token?.Token == "") {
             let msg = `Unable to get token from dnac in credentials`
@@ -315,7 +337,7 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
         }
         return fileOutput
     } catch (err) {
-        let msgOutput = { data: "", msg: `Error in dnacResponse:${err.message || err},status:false` }
+        let msgOutput = { data: "", msg: `Error in dnacResponse:${err.message || err}`,status:false }
         return msgOutput
     }
 }

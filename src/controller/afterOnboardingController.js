@@ -43,14 +43,15 @@ export const deviceDetails = async (req, res) => {
         const db_connect = dbo && dbo.getDb();
 
         let claimedDevices = await db_connect
-            .collection("onboardingdata")
-            .find({ pnpClaim: true })
+            .collection("siteclaimdata")
+            .find({claimStatus:false })
             .toArray();
 
         claimedDevices.forEach(device => {
-            device.source_url = device.dnac || "";
-            device.managementIpAddress = device.device || "";
-            device.serial_number = device.serialNo || "";
+            device.source_url = device.dnacUrl || "";
+            device.managementIpAddress = device.mgmtL3IP || "";
+            device.serial_number = device.serialNumber || "";
+            device.host_name =device.hostname || "";
         });
 
         return res.json({
@@ -70,29 +71,29 @@ export const deviceDetails = async (req, res) => {
 export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
     try {
         const db_connect = dbo.getDb(); // get your db connection
-        const source_url = req.query.source_url;
+        const snmpLocation = req.query.snmpLocation;
 
-        if (!source_url) {
-            return res.status(400).json({ error: "Missing source_url in query" });
-        }
+        // if (!source_url) {
+        //     return res.status(400).json({ error: "Missing source_url in query" });
+        // }
 
-        // Step 1: Get the latest record from siteclaimdata by dnacUrl
-        const siteClaimCollection = db_connect.collection("siteclaimdata");
-        const latestSiteClaim = await siteClaimCollection
-            .find({ dnacUrl: source_url })
-            .sort({ createdAt: -1 })
-            .limit(1)
-            .toArray();
+        // // Step 1: Get the latest record from siteclaimdata by dnacUrl
+        // const siteClaimCollection = db_connect.collection("siteclaimdata");
+        // const latestSiteClaim = await siteClaimCollection
+        //     .find({ dnacUrl: source_url })
+        //     .sort({ createdAt: -1 })
+        //     .limit(1)
+        //     .toArray();
 
-        if (!latestSiteClaim.length) {
-            return res.status(404).json({ message: "No siteclaimdata found for source_url" });
-        }
+        // if (!latestSiteClaim.length) {
+        //     return res.status(404).json({ message: "No siteclaimdata found for source_url" });
+        // }
 
-        const siteClaim = latestSiteClaim[0];
-        const snmpLocation = siteClaim.snmpLocation;
+        // const siteClaim = latestSiteClaim[0];
+        // const snmpLocation = siteClaim.snmpLocation;
 
         if (!snmpLocation) {
-            return res.status(404).json({ message: "SNMP location not found in siteclaimdata" });
+            return res.status(404).json({ message: "SNMP location not found" });
         }
 
         // Step 2: Find a match in ms_pnp_data collection inside PNP_Template_DAY_N array
@@ -126,8 +127,8 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
 export const pingDevice = async (req, res) => {
     try {
         // let { ip, device, dnacUrl } = req.body
-        let { device, dnacUrl } = req.body;
-       let ip = device?.split(" ")[0]; // Extract IP from device string
+        let { device, dnacUrl,ip } = req.body;
+        device = device?.split(" ")[0]; // Extract IP from device string
         if (!ip || !device || !dnacUrl) {
             logger.error({ msg: "Unable to get ip,device or dnac url ", status: false })
             console.log({ msg: "Unable to get ip,device or dnac url ", status: false })
@@ -147,7 +148,7 @@ export const pingDevice = async (req, res) => {
             logger.info(resultMsg)
             return res.send(resultMsg)
         } else {
-            let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: true }
+            let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: false }
             console.log(resultMsg)
             logger.info(resultMsg)
             return res.send(resultMsg)
@@ -252,17 +253,18 @@ const generateInterfaceConfig = (interfaceLevel) => {
     let interfaceConfig = "";
 
     interfaceLevel.forEach((item) => {
-        const intf = item?.interface;
+        const interfaces = item?.interface || [];
         const descRaw = item?.port_description || "";
         const desc = descRaw.toLowerCase();
         const accessVlan = item?.access_vlan || "X";
         const voiceVlan = item?.voice_vlan || "X";
 
-        interfaceConfig += `interface ${intf}\n`;
-        interfaceConfig += `description ${descRaw}\n`;
+        interfaces.forEach((intf) => {
+            interfaceConfig += `interface ${intf}\n`;
+            interfaceConfig += `description ${descRaw}\n`;
 
-        if (desc.includes("USER DATA & VOICE PORT")) {
-            interfaceConfig += `
+            if (desc.includes("user data & voice port")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport voice vlan ${voiceVlan}
@@ -285,9 +287,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("user data")) {
-            interfaceConfig += `
+            } else if (desc.includes("user data")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport voice vlan ${voiceVlan}
@@ -310,9 +311,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("Stagging")) {
-            interfaceConfig += `
+            } else if (desc.includes("stagging")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport nonegotiate
@@ -335,9 +335,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("Printer")) {
-            interfaceConfig += `
+            } else if (desc.includes("printer")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport nonegotiate
@@ -360,9 +359,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("Voice")) {
-            interfaceConfig += `
+            } else if (desc.includes("voice")) {
+                interfaceConfig += `
 switchport mode access
 switchport voice vlan ${voiceVlan}
 device-tracking attach-policy ise-tracking
@@ -384,9 +382,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("CCTV")) {
-            interfaceConfig += `
+            } else if (desc.includes("cctv")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport nonegotiate
@@ -409,9 +406,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("ACT")) {
-            interfaceConfig += `
+            } else if (desc.includes("act")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport nonegotiate
@@ -434,9 +430,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("BMS")) {
-            interfaceConfig += `
+            } else if (desc.includes("bms")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 switchport nonegotiate
@@ -459,9 +454,8 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else if (desc.includes("CMS")) {
-            interfaceConfig += `
+            } else if (desc.includes("cms")) {
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 device-tracking attach-policy ise-tracking
@@ -483,10 +477,9 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-
-        } else {
-            // Default/fallback config if no keyword matched
-            interfaceConfig += `
+            } else {
+                // Default case
+                interfaceConfig += `
 switchport access vlan ${accessVlan}
 switchport mode access
 device-tracking attach-policy ise-tracking
@@ -508,13 +501,15 @@ spanning-tree bpduguard enable
 storm-control action trap
 no shutdown
 `.trim();
-        }
+            }
 
-        interfaceConfig += `\n\n`; // gap between interface blocks
+            interfaceConfig += `\n\n`; // gap between interface blocks
+        });
     });
 
     return interfaceConfig.trim();
 };
+
 
 
 export const configurationDetails = async (req, res) => {
@@ -668,6 +663,11 @@ export const tacacsAndRadiusConf = async (req, res) => {
     try {
 
         let data = req.body
+
+        const configOutput = generateInterfaceConfig(req.body.interfaceLevel);
+        // console.log(configOutput," final interface config");
+        
+
         if (data && data?.registrationData.length == 0) {
             console.log(`Unable to get data from user.`)
             logger.error({ msg: `Unable to get data from user.`, status: false })
@@ -731,8 +731,9 @@ export const tacacsAndRadiusConf = async (req, res) => {
         config += commonConfig
 
         console.log("config2", config)
+        let finalConfig = `${configOutput}\n${config}`;
         let Data = {
-            config: config,
+            config: finalConfig,
             dnac: data?.dnacUrl,
             device: data?.device
         }
@@ -1090,15 +1091,15 @@ export const getRadiusConfiguration = async (req, res) => {
         const radiusConfig = [
             // "ARUBA WAP PORT",
             // "Cisco WAP",
-            "USER DATA & VOICE PORT",
-            "USER DATA PORT",
-            "Stagging Area PORT",
-            "Printer Port",
-            "Voice PORT",
-            "CCTV Port",
-            "ACT Port",
-            "BMS Port",
-            "CMS Port"
+            "user data & voice port",
+            "user data port",
+            "stagging area port",
+            "printer port",
+            "voice port",
+            "cctv port",
+            "act port",
+            "bms port",
+            "cms port"
         ];
 
         return res.status(200).json({

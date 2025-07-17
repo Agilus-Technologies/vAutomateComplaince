@@ -11,7 +11,6 @@ import axios from "axios";
 import onboardingModel from '../model/onboardingModel.js';
 // import similarity from 'string-similarity';
 import semver from 'semver';
-import { ObjectId } from "mongodb";
 
 
 
@@ -317,9 +316,9 @@ export const configDevicesInDnac = async (req, res) => {
 
 export const getUnClaimedDevice = async (req, res) => {
     try {
-        const { dnacUrl } = req.body;
+        const { dnacUrl,serialNumber } = req.body;
 
-        if (!dnacUrl) {
+        if (!dnacUrl && !serialNumber) {
             return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
         }
 
@@ -335,8 +334,8 @@ export const getUnClaimedDevice = async (req, res) => {
         let allDevices = [];
 
         while (true) {
-            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
-            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
+            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
+            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
             const hostName = new URL(dnacUrl).hostname;
             const httpsAgent = new https.Agent({
                 rejectUnauthorized: false
@@ -618,24 +617,24 @@ export const pnpSiteClaim = async (data, dnac) => {
 export const saveClaimSiteData = async (req, res) => {
     try {
         const payload = req.body;
-        for (let key in payload) {
-            if (payload[key] == null || payload[key] == "")
-                return res.send({ msg: `Please provide ${key} value`, status: false });
-        }
-        const db_connect = dbo && dbo.getDb();
-        if (!db_connect) {
-            return res.json({ msg: "Database connection failed", status: false });
-        }
+        // for (let key in payload) {
+        //         if (payload[key] == null || payload[key] == "")
+        //             return res.send({ msg: `Please provide ${key} value`, status: false });
+        //     }
+            const db_connect = dbo && dbo.getDb();
+            if (!db_connect) {
+                return res.json({ msg: "Database connection failed", status: false });
+            }
+            
+            // let getTemplateId = await db_connect.collection('ms_dnac_template_id').findOne({"dnac_url": payload.dnacUrl,software_type:"IOS-XE"});
 
-        let getTemplateId = await db_connect.collection('ms_dnac_template_id').findOne({"dnac_url": payload.dnacUrl,software_type:"IOS-XE"});
-
-        // let getTemplateID = await getTemplate(payload.dnacUrl)
-        // console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
-        // let filterTemplate;
-        // if (getTemplateID) {
-        //     getTemplateID = JSON.parse(getTemplateID)
-        //     filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
-        // }
+        let getTemplateID = await getTemplate(payload.dnacUrl)
+        console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
+        let filterTemplate;
+        if (getTemplateID) {
+            getTemplateID = JSON.parse(getTemplateID)
+            filterTemplate = getTemplateID.filter((item) => item.templateId == payload.template)
+        }
         // if (!filterTemplate || filterTemplate.length == 0) {
         //     return res.json({ msg: "Unable to find template from dnac", status: false })
         // }
@@ -688,7 +687,9 @@ export const saveClaimSiteData = async (req, res) => {
             "siteId": payload?.site,
             "type": "Default",
             "configInfo": {
-                "configId": getTemplateId && getTemplateId?.template_id || "0514a78a-67d5-405b-846d-8ba43610e6a9",
+                // "configId": filterTemplate && filterTemplate[0].templateId || payload.template,
+                "configId":  payload.template,
+
                 "configParameters": [
                     {
                         "key": "vtpversion",
@@ -779,7 +780,7 @@ export const saveClaimSiteData = async (req, res) => {
         const documentToInsert = {
             ...payload,
             configData: data,
-            claimStatus: "",
+            claimStatus: false,
             createdAt: timestamp,
             updatedAt: timestamp,
             dayNBoarding:false
@@ -788,12 +789,13 @@ export const saveClaimSiteData = async (req, res) => {
         console.log("saveData", saveData)
         //site-claim api
         let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
-        let ObjectId = new ObjectId(payload.id);
-        await db_connect.collection("onboardingdata").findOneAndUpdate({ _id:  ObjectId}, { $set: { pnpClaim: true } },{ returnDocument: "after" });
 
         console.log("pnpSiteDeviceClaim", pnpSiteDeviceClaim);
         // let updateData = await db_connect.collection("siteclaimdata").update({ "_id": ObjectId("682330e4d861028d53209239") },{ $set:{ "claimStatus": "success"}});
-        return res.status(200).json({ msg: pnpSiteDeviceClaim?.response || "", status: true });
+        // return res.status(200).json({ msg: pnpSiteDeviceClaim?.response || "", status: true });
+
+        return res.status(200).json({ msg: saveData || "", status: true });
+
     } catch (err) {
         let msgError = {
             msg: "Internal server error in site claim",
@@ -1096,7 +1098,7 @@ export const getTemplatesByFloor = async (req, res) => {
 export const getDeviceDetails = async (req, res) => {
   try {
     const { hostname, ip, site } = req.query;
-    if (!site) {
+    if (!site && !hostname && !ip) {
       return res.status(400).json({ error: "Provide at least one search parameter" });
     }
 
@@ -1107,8 +1109,8 @@ export const getDeviceDetails = async (req, res) => {
       "PE_DEVICE_DAY_0": {
         $elemMatch: {
         //   ...(hostname && { pe_hostname: hostname }),
-        //   ...(ip && { pe_ip: ip }),
-          ...(site && { list_of_floor: site }),
+          ...(ip && { pe_ip: ip }),
+        //   ...(site && { list_of_floor: site }),
         },
       },
     };
