@@ -11,6 +11,10 @@ import * as xlsx from 'xlsx';
 // import xlsx from "xlsx";
 import fs from "fs"
 import path from "path"
+import jwt from 'jsonwebtoken';
+import { ObjectId } from 'mongodb';
+
+
 
 // const base64 = require('base-64');
 
@@ -44,7 +48,7 @@ export const deviceDetails = async (req, res) => {
 
         let claimedDevices = await db_connect
             .collection("siteclaimdata")
-            .find({claimStatus:false })
+            .find({claimStatus:true })
             .toArray();
 
         claimedDevices.forEach(device => {
@@ -969,46 +973,46 @@ function normalizeKeys(row) {
     return normalized;
 }
 
-export const convertExcelToJSON = async (req, res) => {
-    try {
-        const db_connect = dbo && dbo.getDb();
-        const __dirname = path.resolve();
-        const filePath = path.join(__dirname, 'Assignment_Group.xlsx');
-        const workbook = xlsx.readFile(filePath);
-        const sheetNames = workbook.SheetNames;
+// export const convertExcelToJSON = async (req, res) => {
+//     try {
+//         const db_connect = dbo && dbo.getDb();
+//         const __dirname = path.resolve();
+//         const filePath = path.join(__dirname, 'Assignment_Group.xlsx');
+//         const workbook = xlsx.readFile(filePath);
+//         const sheetNames = workbook.SheetNames;
 
-        let outputData = {};
+//         let outputData = {};
 
-        for (let i = 0; i < sheetNames.length - 1; i++) {
-            const sheet = workbook.Sheets[sheetNames[0]];
-            let jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
+//         for (let i = 0; i < sheetNames.length - 1; i++) {
+//             const sheet = workbook.Sheets[sheetNames[0]];
+//             let jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
 
-            jsonData = jsonData.map(row => {
-                row = normalizeKeys(row);
-                return {
-                    ...row,
-                    mgmt_subnet: row['mgmt_subnet'] ?? '10.138.132.128/25',
-                    reserved_seed_ports: row['reserved_seed_ports'] ?? 'Need to Reserve Two ports one from primary and one from secondary'
-                };
-            });
+//             jsonData = jsonData.map(row => {
+//                 row = normalizeKeys(row);
+//                 return {
+//                     ...row,
+//                     mgmt_subnet: row['mgmt_subnet'] ?? '10.138.132.128/25',
+//                     reserved_seed_ports: row['reserved_seed_ports'] ?? 'Need to Reserve Two ports one from primary and one from secondary'
+//                 };
+//             });
 
-            outputData[sheetNames[i]] = jsonData;
-        }
+//             outputData[sheetNames[i]] = jsonData;
+//         }
 
-        if (Object.keys(outputData).length !== 0) {
-            let savePNPData = await db_connect.collection('ms_pnp_data').insertOne(outputData);
-            console.log('Excel converted to JSON and saved to MongoDB!');
-            return res.status(200).json({ message: "Data inserted successfully" });
-        } else {
-            console.log("Unable to read data from Excel in PNP");
-            return res.status(400).json({ message: "No data found in Excel" });
-        }
+//         if (Object.keys(outputData).length !== 0) {
+//             let savePNPData = await db_connect.collection('ms_pnp_data').insertOne(outputData);
+//             console.log('Excel converted to JSON and saved to MongoDB!');
+//             return res.status(200).json({ message: "Data inserted successfully" });
+//         } else {
+//             console.log("Unable to read data from Excel in PNP");
+//             return res.status(400).json({ message: "No data found in Excel" });
+//         }
 
-    } catch (err) {
-        console.log("Error in convertExcelToJSON:", err);
-        return res.status(500).json({ error: 'Internal Server Error' });
-    }
-};
+//     } catch (err) {
+//         console.log("Error in convertExcelToJSON:", err);
+//         return res.status(500).json({ error: 'Internal Server Error' });
+//     }
+// };
 
 
 
@@ -1076,14 +1080,59 @@ export const pnpDatafromDB = async (req, res) => {
 //     }
 // };
 
-// function normalizeKeys2(row) {
-//     const normalized = {};
-//     Object.keys(row).forEach(key => {
-//         const cleanKey = key.trim().replace(/\s+/g, '_').toLowerCase();
-//         normalized[cleanKey] = row[key];
-//     });
-//     return normalized;
-// }
+// export const insertExcelRowsAsDocuments = async (req, res) => {
+//     try {
+//         const db_connect = dbo && dbo.getDb();
+//         const __dirname = path.resolve();
+//         const filePath = path.join(__dirname, 'Day0_DayN_Template_Name_METADATA.xlsx');
+
+//         const workbook = xlsx.readFile(filePath);
+//         const sheetName = 'Template_ID'; // Specify the sheet name you want to process
+//         // const sheetName = 'PNP_Template_DAY_N'
+
+//         if (!workbook.SheetNames.includes(sheetName)) {
+//             return res.status(400).json({ success: false, message: `'${sheetName}' sheet not found in Excel file.` });
+//         }
+
+//         const sheet = workbook.Sheets[sheetName];
+//         let jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
+
+//         const documents = jsonData.map(row => ({
+//             ...normalizeKeys2(row),
+//             sheet_name: sheetName
+//         }));
+
+//         if (documents.length > 0) {
+//             const result = await db_connect.collection('template_mapping').insertMany(documents);
+//             // const result = await db_connect.collection('dayN_configs').insertMany(documents);
+
+//             console.log(`✅ ${result.insertedCount} documents inserted from '${sheetName}' sheet.`);
+//             return res.status(200).json({
+//                 success: true,
+//                 message: `${result.insertedCount} documents inserted from '${sheetName}'`,
+//                 insertedCount: result.insertedCount
+//             });
+//         } else {
+//             return res.status(400).json({ success: false, message: `No data found in '${sheetName}' sheet.` });
+//         }
+
+//     } catch (err) {
+//         console.error("❌ Error inserting 'templateid' sheet:", err);
+//         return res.status(500).json({ success: false, message: 'Internal Server Error' });
+//     }
+
+// };
+
+
+
+function normalizeKeys2(row) {
+    const normalized = {};
+    Object.keys(row).forEach(key => {
+        const cleanKey = key.trim().replace(/\s+/g, '_').toLowerCase();
+        normalized[cleanKey] = row[key];
+    });
+    return normalized;
+}
 
 
 export const getRadiusConfiguration = async (req, res) => {
@@ -1111,6 +1160,155 @@ export const getRadiusConfiguration = async (req, res) => {
     } catch (error) {
         console.error("Error in getRadiusConfiguration:", error);
         return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
+
+
+export const deployDefaultGateway = async (req, res) => {
+  try {
+    const { dnac, device, gateway_ip } = req.body;
+
+    if (!dnac || !device || !gateway_ip) {
+      return res.status(400).json({ msg: "Missing required fields", status: false });
+    }
+
+    const item = {
+      dnac,
+      device,
+      config: 
+        `ip default-gateway ${gateway_ip}`
+    };
+
+    const result = await execute_templates(item);
+
+    if (typeof result === 'string' || result.status === true) {
+      return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
+    } else {
+      return res.status(500).json({ msg: "Failed to configure default gateway", result,status: false });
+    }
+
+  } catch (error) {
+    console.error("Controller error:", error.message || error);
+    return res.status(500).json({ msg: "Internal Server Error", error: error.message });
+  }
+};
+
+
+export const getPnpClaimedDevices = async (req, res) => {
+     try {
+
+        const db_connect = dbo && dbo.getDb();
+
+        let claimedDevices = await db_connect
+            .collection("siteclaimdata")
+            .find({ })
+            .toArray();
+
+        if (claimedDevices.length === 0) {
+            return res.json({
+                msg: "No claimed devices found.",
+                status: true,
+                data: []
+            });
+        }
+
+        return res.json({
+            msg: "Claimed devices fetched successfully.",
+            status: true,
+            data: claimedDevices
+        });
+    } catch (err) {
+        const errorMsg = { msg: `Error in getClaimedDevices: ${err}`, status: false };
+        logger.error(errorMsg);
+        console.log(errorMsg);
+        return res.status(500).json(errorMsg);
+    }
+};
+
+
+export const getDeviceStatus = async (req, res) => {
+
+    try {
+
+        const { serialNumber, dnacUrl,id } = req.query;
+        const credentialsData = await commonCredentials('', dnacUrl);
+
+        if (!credentialsData?.token) {
+            return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
+        }
+        const response = await axios.get(
+            `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Auth-Token": credentialsData?.token,
+                },
+                httpsAgent: new https.Agent({ rejectUnauthorized: false }) // If self-signed
+            }
+        );
+
+        const device = response.data[0];
+
+        if (!device) {
+            return res.status(404).json({
+                message: "Device not found for provided serial number",
+                serialNumber,
+            });
+        }
+        const db_connect = dbo && dbo.getDb();
+        let update = await db_connect.collection("siteclaimdata").updateOne(
+            { _id: new ObjectId(id) },
+            {
+                $set: {
+                    state: device.deviceInfo.state,
+                    claimError: device.deviceInfo.errorDetails?.details || null,
+                },
+            }
+        );
+
+
+        return res.json({
+      serialNumber: device.deviceInfo.serialNumber,
+      deviceName: device.deviceInfo.hostname,
+      state: device.deviceInfo.state,
+      workflowState: device.workflow?.state,
+      errorMessage: device.deviceInfo.errorDetails?.details || null,
+      dayZeroErrorMessage: device.dayZeroConfigPreview?.errorMessage || null
+        });
+
+    } catch (error) {
+        console.error("Error fetching PnP device status:", error.message);
+        return res.status(500).json({
+            message: "Failed to retrieve device status",
+            error: error.message,
+        });
+    }
+};
+
+
+
+export const getDeviceBySerialOrIP = async (req, res) => {
+    try {
+        const { serialNumber, ipAddress } = req.query;
+
+        if (!serialNumber && !ipAddress) {
+            return res.status(400).json({ error: "Serial number or IP address is required" });
+        }
+        const db_connect = dbo && dbo.getDb();
+        const query = serialNumber
+      ? { serialNumber: serialNumber }
+      : { managementIpAddress: ipAddress };
+
+        const device = await db_connect.collection("ms_dnac_inventory").findOne(query);
+
+
+    } catch (error) {
+        console.error("Error fetching PnP device by serial number:", error.message);
+        return res.status(500).json({
+            message: "Failed to retrieve device by serial number",
+            error: error.message,
+        });
     }
 };
 

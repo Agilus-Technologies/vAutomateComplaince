@@ -223,28 +223,37 @@ const configuration = (datass) => {
     if (!datass.cleanedData || datass.cleanedData.length === 0) return "";
 
     datass.cleanedData.forEach((row) => {
-        const iface = row.interfaceID;
+        const ifaceStr = row.interfaceID;
         const vlan = row.vlanID;
         const desc = datass.otherParameter || "Configured via automation";
-        let config = "";
-        if (datass.dayOnboardingMethod.includes("Access Switch")) {
-           config = `interface ${iface}
+
+        // Split interfaces by comma
+        const interfaces = ifaceStr.split(",").map((i) => i.trim());
+
+        interfaces.forEach((iface) => {
+            let config = "";
+
+            if (datass.dayOnboardingMethod.includes("Access Switch")) {
+                config = `interface ${iface}
 description ${desc}
 switchport access vlan ${vlan}
 switchport mode access
-no shutdown`;   
-        } else {
-           config = `interface ${iface}
+no shutdown`;
+            } else {
+                config = `interface ${iface}
 description ${desc}
 switchport mode trunk
 switchport trunk allowed vlan ${vlan}
 no shutdown`;
-}
-        configLines.push(config);
+            }
+
+            configLines.push(config);
+        });
     });
 
     return configLines.join("\n\n");
 };
+
 
 export const configDevicesInDnac = async (req, res) => {
     try {
@@ -334,8 +343,8 @@ export const getUnClaimedDevice = async (req, res) => {
         let allDevices = [];
 
         while (true) {
-            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?offset=${offset}&limit=${limit}`;
-            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`;
+            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device`;
+            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}&state=Unclaimed`;
             const hostName = new URL(dnacUrl).hostname;
             const httpsAgent = new https.Agent({
                 rejectUnauthorized: false
@@ -598,97 +607,59 @@ export const pnpSiteClaim = async (data, dnac) => {
         };
 
         const response = await axios.request(config);
-        console.log("response", response)
-        let deploymentIdsss = JSON.stringify(response.data, null, 2)
-        console.log("deploymentIdsss", deploymentIdsss)
-        deploymentIdsss = JSON.parse(deploymentIdsss)
-        return deploymentIdsss
+         return {
+            statusCode: response.status,
+            message: "Success",
+            data: response.data
+        };
 
     } catch (err) {
-        console.log("error in pnpSiteClaim", err)
-        return ({
-            msg: "Internal server error in pnp",
-            error: err.message,
-            status: false
-        });
+        const statusCode = err.response?.status || 500;
+        const message = err.response?.data?.message || err.message || "Unknown error";
+
+        return {
+            statusCode,
+            message,
+            error: true,
+            details: err.response?.data || {}
+        };  
     }
 }
 
 export const saveClaimSiteData = async (req, res) => {
     try {
+
+
         const payload = req.body;
-        // for (let key in payload) {
-        //         if (payload[key] == null || payload[key] == "")
-        //             return res.send({ msg: `Please provide ${key} value`, status: false });
-        //     }
+        for (let key in payload) {
+                if (payload[key] == null || payload[key] == "")
+                    return res.send({ msg: `Please provide ${key} value`, status: false });
+            }
             const db_connect = dbo && dbo.getDb();
             if (!db_connect) {
                 return res.json({ msg: "Database connection failed", status: false });
             }
             
-            // let getTemplateId = await db_connect.collection('ms_dnac_template_id').findOne({"dnac_url": payload.dnacUrl,software_type:"IOS-XE"});
 
         let getTemplateID = await getTemplate(payload.dnacUrl)
         console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
         let filterTemplate;
         if (getTemplateID) {
             getTemplateID = JSON.parse(getTemplateID)
-            filterTemplate = getTemplateID.filter((item) => item.templateId == payload.template)
+            filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
         }
-        // if (!filterTemplate || filterTemplate.length == 0) {
-        //     return res.json({ msg: "Unable to find template from dnac", status: false })
-        // }
+        if (!filterTemplate || filterTemplate.length == 0) {
+            return res.json({ msg: "Unable to find template from dnac", status: false })
+        }
 
-        //********** get image id**********************
-
-        // let getimageID = await getImageID(payload.dnacUrl)
-        // let parseData = JSON.parse(getimageID)
-        // let isTaggedGoldenFilterData = parseData.response.filter((item) => item.isTaggedGolden === true)
-
-        // const desiredVersion = payload?.goldenImage;
-        // function normalizeVersion(ver) {
-        //     if (typeof ver !== 'string') return null;
-
-        //     // Reject if any non-numeric (letter/symbol) appears
-        //     if (!/^\d+(\.\d+){1,2}$/.test(ver)) return null;
-
-        //     const parts = ver.split('.').map(Number);
-        //     while (parts.length < 3) parts.push(0);
-        //     return parts.slice(0, 3).join('.');
-        // }
-        // const exactMatch = isTaggedGoldenFilterData.filter(entry => {
-        //     const normalizedEntryVersion = normalizeVersion(entry.displayVersion);
-        //     const normalizedDesiredVersion = normalizeVersion(desiredVersion);
-        //     if (!normalizedEntryVersion || !normalizedDesiredVersion) return false;
-        //     return semver.eq(normalizedEntryVersion, normalizedDesiredVersion);
-        // });
-
-        // if (!exactMatch || exactMatch.length == 0) {
-        //     console.log("No matching item found.");
-        //     return res.json({ msg: "No matching item found for golden image id", status: false })
-        // }
-        // let imageUUId;
-        // for (let i = 0; i < exactMatch[0].applicableDevicesForImage.length; i++) {
-        //     if (exactMatch[0].applicableDevicesForImage[i].productId.includes(payload.pid)) {
-        //         console.log(true)
-        //         imageUUId = exactMatch[0].imageUuid
-        //         break;
-        //     } else {
-        //         console.log(false)
-        //     }
-        // }
-        // if (!imageUUId || imageUUId == "") {
-        //     return res.json({ msg: "Image id not found", status: false })
-        // }
-        // ********************************************************************************
         let data = {
             "deviceId": payload?.devideID,
             "device":   payload?.device,
             "siteId": payload?.site,
             "type": "Default",
             "configInfo": {
-                // "configId": filterTemplate && filterTemplate[0].templateId || payload.template,
-                "configId":  payload.template,
+                "configId": filterTemplate && filterTemplate[0].templateId ,
+                // "configId":  payload.template,
 
                 "configParameters": [
                     {
@@ -747,34 +718,6 @@ export const saveClaimSiteData = async (req, res) => {
                 ]
             }
         }
-        // let data = {
-        //     "deviceId": payload?.devideID,
-        //     "siteId": payload?.site,
-        //     "type": "Default",
-        //     "imageInfo": {
-        //         "imageId": imageUUId,
-        //         "skip": true
-        //     },
-        //     "configInfo": [
-        //         {
-        //             "configId": filterTemplate[0]?.templateId,
-        //             "configParameters": {
-        //                 "Hostname": payload?.hostname,
-        //                 "vtpversion": payload?.vtpVersion,
-        //                 "vtpdomain": payload?.vtpDomainNam,
-        //                 "vtppwd": payload?.vtpPassword,
-        //                 "SPANMODE": payload?.stp,
-        //                 "vlanid": payload?.mgmtVlanL2,
-        //                 "MGMTINT": payload?.mgmtVlanL3Interface,
-        //                 "ipaddress": payload?.mgmtL3IP,
-        //                 "SNMPLocation": payload?.snmpLocation,
-        //                 "LOGGINGHOST1": payload?.loggingHost1,
-        //                 "LOGGINGHOST2": payload?.loggingHost2,
-        //                 "uplinkinterface": payload?.accessUplink
-        //             }
-        //         }
-        //     ]
-        // }
         console.log("claim payload: ", JSON.stringify(data, null, 2))
         const timestamp = new Date();
         const documentToInsert = {
@@ -783,18 +726,51 @@ export const saveClaimSiteData = async (req, res) => {
             claimStatus: false,
             createdAt: timestamp,
             updatedAt: timestamp,
-            dayNBoarding:false
+            dayNBoarding:false,
+            userInfo: {
+                username: userInfo?.username || '',
+                role: userInfo?.role || '',
+                email: userInfo?.sub || ''
+            }
         };
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
         //site-claim api
-        let pnpSiteDeviceClaim = await pnpSiteClaim(data, payload.dnacUrl)
+        let pnpResponse = await pnpSiteClaim(data, payload.dnacUrl)
+                // let pnpResponse = {
+                //     statusCode: 200,
+                //     message: "Device claimed successfully",
+                //     data: {
+                //         deviceId: payload.devideID,
+                //         siteId: payload.site,
+                //         type: "Default",
+                //         configInfo: data.configInfo
+                //     }
+                // }
+        const { statusCode, message, data: responseData } = pnpResponse;
+        // If DNAC returns success, update claimStatus = true
+        if (statusCode >= 200 && statusCode < 300) {
+            await db_connect.collection("siteclaimdata").updateOne(
+                { _id: saveData.insertedId },
+                {
+                    $set: {
+                        claimStatus: true,
+                        updatedAt: new Date()
+                    }
+                }
+            );
 
-        console.log("pnpSiteDeviceClaim", pnpSiteDeviceClaim);
-        // let updateData = await db_connect.collection("siteclaimdata").update({ "_id": ObjectId("682330e4d861028d53209239") },{ $set:{ "claimStatus": "success"}});
-        // return res.status(200).json({ msg: pnpSiteDeviceClaim?.response || "", status: true });
-
-        return res.status(200).json({ msg: saveData || "", status: true });
+            return res.status(statusCode).json({
+                msg: "Device claimed successfully",
+                status: true,
+                data: responseData || {}
+            });
+        }
+        return res.status(statusCode || 500).json({
+            msg: `Site claim failed from DNAC: ${message || "Unknown error"}`,
+            status: false,
+            error: pnpResponse?.details || {}
+        });
 
     } catch (err) {
         let msgError = {
@@ -1173,7 +1149,10 @@ export const getAllLocations = async (req, res) => {
 
 
 export const getDevicesByLocation = async (req, res) => {
-    const { location } = req.query;
+    const { location,onboard } = req.query;
+    if (onboard === 'Use Shared Switch (Access Switch - 9300)') {
+        return res.status(400).json({ success: true,devices: [] });
+    }
 
     if (!location) {
         return res.status(400).json({ success: false, message: "Location query param is required" });
@@ -1248,15 +1227,22 @@ export const getDeviceInfo = async (req, res) => {
                 });
 
                 if (found) {
+                    const metadata = await db.collection("ms_cmdb_devices").findOne({
+                        managementip: found.pe_ip,
+                    });
+        //                     if (!metadata) {
+        //     return res.status(404).json({ success: false, message: 'No data found' });
+        // }
                     return res.status(200).json({
                         success: true,
                         data: {
-                            region: found.region,
-                            site: found.site || '',
+                            region: metadata?.region || null,
+                            site: metadata?.site || '',
+                            site_plus: metadata?.["site+"] || '',
                             floor: found.list_of_floor,
                             "PE": found.pe_hostname || null,
                             "IP": found.pe_ip || null,
-                            "Serial": found.serial_no || 'FGL2352LH52',
+                            "Serial": metadata?.serial_number || '',
                             vlan: found.vlan,
                             reserved_seed_ports: found.reserved_seed_ports || null
                         }

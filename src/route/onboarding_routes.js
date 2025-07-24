@@ -2,10 +2,11 @@ import express from "express";
 import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot, getPnpDevices, getFloorValue, getTemplatesByFloor, getDeviceDetails, getAllLocations, getDevicesByLocation, getDeviceInfo} from "../controller/Onboarding.js";
 // import { authenticate, authorizeRoles} from '../../auth.js';
 // import { dnacDataDetail, insertDeviceInDnac, onboardDeviceDetails } from "../controller/Onboarding_Portal/Onboarding.js";
-import { configurationDetails, configureDevice, configureDeviceInISE, deviceDetails, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf} from "../controller/afterOnboardingController.js";
+import { configurationDetails, configureDevice, configureDeviceInISE, deployDefaultGateway, deviceDetails, getDeviceBySerialOrIP, getDeviceStatus, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf} from "../controller/afterOnboardingController.js";
 
 
 const router = express.Router();
+// ******************** Device onboarding (PnP) ***********************
 
 // //insert device in dnac
 // router.post('/insertDevice',insertDeviceInDnac);
@@ -26,6 +27,7 @@ router.get('/devicesByLocation',getDevicesByLocation);
 router.get('/device-details',getDeviceInfo);
 
 
+// **************** Reachability, config push *******************************
 
 
 router.get('/deviceDetails',deviceDetails);
@@ -36,9 +38,18 @@ router.post('/tacacsAndRadiusConfs',tacacsAndRadiusConf);
 router.post("/configure-device", configureDevice);
 router.get('/configureDeviceInISE',configureDeviceInISE);
 router.get('/pnpDatafromDB',pnpDatafromDB);
-// router.get('/convertExcelToJSON',convertExcelToJSON);
+// router.get('/convertExcelToJSON',insertExcelRowsAsDocuments);
 router.get('/getLatestSiteClaimBySourceUrl',getSiteClaimAndPnpTemplateBySourceUrl);
 router.get('/radius-config',getRadiusConfiguration);
+router.post('/deployGateway', deployDefaultGateway);
+router.get('/getPnpClaimedDevices',getPnpClaimedDevices );
+router.get('/device-status',getDeviceStatus );
+
+router.get('/getDeviceBySerialOrIP',getDeviceBySerialOrIP );
+
+
+
+
 
 
 

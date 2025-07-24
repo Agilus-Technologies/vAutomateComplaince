@@ -5,6 +5,8 @@ import { decript, encryptAES } from "./helper.js";
 import dbo from "../db/conn.js";
 import axios from "axios";
 import logger from '../../logger.js';
+import { log } from "console";
+import e from "express";
 
 export const db_config = async (req, res) => {
     try {
@@ -150,6 +152,7 @@ async function getInstanceUuid(dnacUrl, ipAddress, token) {
         const instanceUuid = response.data.response.instanceUuid;
         return instanceUuid;
     } catch (error) {
+        logger.error("error in getInstanceUuid",error);
         console.error('Error getting instanceUuid:', error.message);
         throw new Error('Unable to fetch instanceUuid');
     }
@@ -210,6 +213,7 @@ export const commonCredentials = async (ip = "", dnacUrl = "") => {
         }
         return obj;
     } catch (err) {
+        logger.error("error in commanCredentials",err)
         console.log("Error in commanCredentials in dnacHelper", err)
         let msg = `Error in commanCredentials in dnacHelper:${err}`
         let msg_output = { "msg": msg, status: false }
@@ -249,6 +253,7 @@ export const fileIDResponse = async (dnacUrl, device, taskOutput) => {
         }
         return { data: result, msg: "data get successfully", status: true }
     } catch (err) {
+        logger.error("error in fileIDResponse",err)
         console.log("error in fileIDResponse", err)
         return { data: "", msg: `Error msg in fileIDResponse:${err.message || err}`, status: false }
     }
@@ -283,6 +288,7 @@ export const taskResponse = async (dnacUrl, device, taskUrl) => {
         let { fileId } = JSON.parse(response.data.response.progress)
         return { fileId, msg: "file id get successfully", status: true }
     } catch (err) {
+        logger.error("error in taskResponse",err)
         let msgOutput = { fileId: "", msg: `Error in taskResponse:${err.message || err}`, status: false }
         console.log("error in taskurl", err)
         return msgOutput
@@ -318,26 +324,69 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
         };
 
 
-        const response = await axios.request(config);
-        if (Object.keys(response).length == 0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.url == "") {
-            return { msg: "Unable to get task url", status: false }
+// Retry axios request up to 5 times
+        let response = null;
+        for (let i = 0; i < 5; i++) {
+            try {
+                response = await axios.request(config);
+                if (
+                    response && 
+                    response.data && 
+                    response.data.response && 
+                    response.data.response.url
+                ) {
+                    break; // successful response
+                }
+            } catch (err) {
+                // Optional: Log internal retry error here
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000)); // wait 2s before retry
         }
+
+        if (
+            !response || 
+            !response.data || 
+            !response.data.response || 
+            !response.data.response.url
+        ) {
+            logger.error("Failed to send ping",response)
+            return { msg: "Failed to send ping request. Please try again shortly.", status: false };
+        }
+
         let taskUrl = response.data.response.url
-        let taskOutput = await taskResponse(dnacUrl, device, taskUrl)
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        if (Object.keys(taskOutput) == 0 || Object.keys(taskOutput).length == 0 || taskOutput.status == false) {
-            // logger.error(taskOutput)
-            return taskOutput
+        // let taskOutput = await taskResponse(dnacUrl, device, taskUrl)
+
+          // Poll for task completion
+        let taskOutput = null;
+        for (let i = 0; i < 10; i++) {
+            taskOutput = await taskResponse(dnacUrl, device, taskUrl);
+            if (taskOutput && taskOutput.status && taskOutput.fileId) break;
+            await new Promise(resolve => setTimeout(resolve, 10000));
         }
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        let fileOutput = await fileIDResponse(dnacUrl, device, taskOutput?.fileId)
-        if (fileOutput.status == false) {
-            // logger.error(fileOutput)
-            return fileOutput
+
+        if (!taskOutput || !taskOutput.status || !taskOutput.fileId) {
+             logger.error("Error in taskOutput", taskOutput)
+            return { msg: "Ping request is taking too long. Please try again", status: false };
+        }
+        // if (Object.keys(taskOutput) == 0 || Object.keys(taskOutput).length == 0 || taskOutput.status == false) {
+        //     // logger.error(taskOutput)
+        //     return taskOutput
+        // }
+         let fileOutput = null;
+        for (let i = 0; i < 10; i++) {
+            fileOutput = await fileIDResponse(dnacUrl, device, taskOutput.fileId);
+            if (fileOutput && fileOutput.status) break;
+            await new Promise(resolve => setTimeout(resolve, 10000));
+        }
+
+        if (!fileOutput || !fileOutput.status) {
+            logger.error("Error in fileOutput", fileOutput)
+            return { msg: "Ping result is not available yet. Please wait a few moments and retry", status: false };
         }
         return fileOutput
     } catch (err) {
-        let msgOutput = { data: "", msg: `Error in dnacResponse:${err.message || err}`,status:false }
+        logger.error("Failed to send ping",err)
+        let msgOutput = { data: "", msg: `Ping request failed:${err.message || err}`,status:false }
         return msgOutput
     }
 }
@@ -362,7 +411,7 @@ export const execute_templates = async (item) => {
             "templateId": template_id,
             "targetInfo": [
                 {
-                    "id": item.device, // Ensure this device ID is correct
+                    "id": item.device,
                     "type": "MANAGED_DEVICE_IP",
                     "params": {
                         "param": item.config
@@ -384,12 +433,13 @@ export const execute_templates = async (item) => {
         };
 
         // Log the request data to verify
-        // console.log("Request Payload:", JSON.stringify(data, null, 2));
+        console.log("Request Payload:", JSON.stringify(data, null, 2));
 
         // Send the POST request
         const response = await axios.request(config);
         // console.log("Response Status:", response.status);
         // console.log("Response Data:", JSON.stringify(response.data, null, 2));
+                console.log("✅ Deployment response:", JSON.stringify(response.data, null, 2));
         let deploymentIdsss = JSON.stringify(response.data, null, 2)
         deploymentIdsss = JSON.parse(deploymentIdsss)
         const deployment_ids = deploymentIdsss.deploymentId.split(":").pop().trim()
@@ -417,7 +467,9 @@ export const execute_templates = async (item) => {
             while ((deployStatus !== "SUCCESS" || deployStatus !== "FAILURE") && excuteRes === false) {
                 // let headers = { "x-auth-token": token };
                 const responses = await axios.request(secondConfig);
-                deployStatus = responses.data.devices[0].status
+                console.log("📡 Full status response:", JSON.stringify(responses.data, null, 2));
+                deployStatus = responses?.data?.devices?.[0]?.status;
+                // deployStatus = responses.data.devices[0].status
                 if (deployStatus === "SUCCESS" || deployStatus === "FAILURE") {
                     excuteRes = true
                 }
@@ -434,6 +486,8 @@ export const execute_templates = async (item) => {
         return deployment_id;
 
     } catch (error) {
+        logger.error("Request failed with status",error)
+
         console.log("Error: Request failed with status", error?.message || error);
         return { msg: `Error in excute_template ${error.message}`, status: false };
     }
