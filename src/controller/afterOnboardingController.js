@@ -101,24 +101,22 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
         }
 
         // Step 2: Find a match in ms_pnp_data collection inside PNP_Template_DAY_N array
-        const pnpCollection = db_connect.collection("ms_pnp_data");
+        const pnpCollection = db_connect.collection("dayN_configs");
 
-        const matchedRecord = await pnpCollection.findOne({
-            "PNP_Template_DAY_N.snmp_location": snmpLocation,
-        });
+        const matchedRecord = await pnpCollection.findOne({"snmp_location": snmpLocation});
 
         if (!matchedRecord) {
             return res.status(404).json({ message: "No PNP Template found for SNMP location" });
         }
 
         // Optionally extract only the matching template entry from array:
-        const matchingTemplate = matchedRecord.PNP_Template_DAY_N.find(
-            (entry) => entry.snmp_location === snmpLocation
-        );
+        // const matchingTemplate = matchedRecord.PNP_Template_DAY_N.find(
+        //     (entry) => entry.snmp_location === snmpLocation
+        // );
 
         return res.status(200).json({
             //   siteClaim,
-            matchedPNPTemplate: matchingTemplate || null,
+            matchedPNPTemplate: matchedRecord || null,
         });
     } catch (err) {
         console.error("Error:", err);
@@ -1019,14 +1017,14 @@ function normalizeKeys(row) {
 export const pnpDatafromDB = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-        let getPNPData = await db_connect.collection('ms_pnp_data').find({}).sort({ _id: -1 }).limit(2).toArray();
+        let getPNPData = await db_connect.collection('pe_devices_config').find({}).toArray();
         if (getPNPData.length == 0) {
             console.log("Unbale to get pnp data from db")
             logger.error({ msg: `"Unbale to get pnp data from db"`, status: fasle })
             let msg = { msg: `"Unbale to get pnp data from db"`, status: false }
             return res.send(msg)
         }
-        res.json({ data: getPNPData[0], status: true })
+        res.json({ data: {"Sheet1":getPNPData}, status: true })
 
     } catch (err) {
         console.log("Error in pnpDatafromDB.", err)
@@ -1269,12 +1267,12 @@ export const getDeviceStatus = async (req, res) => {
 
 
         return res.json({
-      serialNumber: device.deviceInfo.serialNumber,
-      deviceName: device.deviceInfo.hostname,
-      state: device.deviceInfo.state,
-      workflowState: device.workflow?.state,
-      errorMessage: device.deviceInfo.errorDetails?.details || null,
-      dayZeroErrorMessage: device.dayZeroConfigPreview?.errorMessage || null
+            serialNumber: device.deviceInfo.serialNumber,
+            deviceName: device.deviceInfo.hostname,
+            state: device.deviceInfo.state,
+            workflowState: device.workflow?.state,
+            errorMessage: device.deviceInfo.errorDetails?.details || null,
+            dayZeroErrorMessage: device.dayZeroConfigPreview?.errorMessage || null
         });
 
     } catch (error) {

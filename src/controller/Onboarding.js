@@ -658,7 +658,7 @@ export const saveClaimSiteData = async (req, res) => {
             "siteId": payload?.site,
             "type": "Default",
             "configInfo": {
-                "configId": filterTemplate && filterTemplate[0].templateId ,
+                "configId": filterTemplate && filterTemplate[0] && filterTemplate[0].templateId ,
                 // "configId":  payload.template,
 
                 "configParameters": [
@@ -727,11 +727,11 @@ export const saveClaimSiteData = async (req, res) => {
             createdAt: timestamp,
             updatedAt: timestamp,
             dayNBoarding:false,
-            userInfo: {
-                username: userInfo?.username || '',
-                role: userInfo?.role || '',
-                email: userInfo?.sub || ''
-            }
+            // userInfo: {
+            //     username: userInfo?.username || '',
+            //     role: userInfo?.role || '',
+            //     email: userInfo?.sub || ''
+            // }
         };
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
@@ -985,13 +985,13 @@ export const getPnpDevices = async (req, res) => {
         const db_connect = dbo && dbo.getDb();
 
         // Fetch the latest document from ms_pnp_data
-        const latestDoc = await db_connect.collection('ms_pnp_data').findOne({name:"pnp_data"});
+        const latestDoc = await db_connect.collection('pe_devices_config').find({}).toArray();
 
-        if (!latestDoc || !latestDoc.PE_DEVICE_DAY_0) {
+        if (!latestDoc) {
             return res.status(404).json({ message: 'No PE_DEVICE_DAY_0 data found.' });
         }
 
-        const formattedDevices = latestDoc.PE_DEVICE_DAY_0.map(device => {
+        const formattedDevices = latestDoc.map(device => {
             const hostname = device.pe_hostname ?? 'unknown';
             const pnpIP = device.pnp_ip_address ?? '0.0.0.0';
             return `${hostname} (${pnpIP})`;
@@ -1010,16 +1010,16 @@ export const getFloorValue = async (req, res) => {
         const db_connect = dbo && dbo.getDb();
 
         // Fetch the latest document from ms_pnp_data
-        const latestDoc = await db_connect.collection('ms_pnp_data').findOne({name:"pnp_data"});
+        const latestDoc = await db_connect.collection('pe_devices_config').find({}).toArray();
 
-        if (!latestDoc || !latestDoc.PE_DEVICE_DAY_0) {
+        if (!latestDoc) {
             return res.status(404).json({ message: 'No PE_DEVICE_DAY_0 data found.' });
         }
 
         // const formatted = latestDoc.PE_DEVICE_DAY_0.map(device => {
         //     return `${device.list_of_floor ?? 'unknown'})`;
         // });
-        const formatted = [...new Set(latestDoc.PE_DEVICE_DAY_0.map(d => d.list_of_floor ?? 'unknown'))].map(f => `${f}`);
+        const formatted = [...new Set(latestDoc.map(d => d.list_of_floor ?? 'unknown'))].map(f => `${f}`);
 
 
         return res.status(200).json({ data: formatted });
@@ -1040,20 +1040,18 @@ export const getTemplatesByFloor = async (req, res) => {
         }
 
         // Fetch template array from DB
-        const templateDoc = await db_connect.collection("ms_pnp_data").findOne({name:"templateData"}, { projection: { Template_ID: 1 } });
+        const templates = await db_connect.collection("template_mapping").find().toArray();
 
-        if (!templateDoc || !templateDoc.Template_ID) {
+        if (templates.length === 0) {
             return res.status(404).json({ error: 'Template data not found in DB' });
         }
 
-        const templates = templateDoc.Template_ID;
-
-            // Normalize siteQuery: handle "Bengaluru" → "Bangalore"
-           siteQuery = siteQuery.toLowerCase().replace('bengaluru', 'bangalore');
-           siteQuery = siteQuery.toLowerCase().replace('Mumbai','Navi Mumbai');
+        // Normalize siteQuery: handle "Bengaluru" → "Bangalore"
+        siteQuery = siteQuery.toLowerCase().replace('bengaluru', 'bangalore');
+        siteQuery = siteQuery.toLowerCase().replace('Mumbai','Navi Mumbai');
 
 
-         const matchedTemplates = templates.filter(template => {
+        const matchedTemplates = templates.filter(template => {
             return siteQuery.toLowerCase().includes(template.site.toLowerCase());
         });
 
@@ -1091,19 +1089,19 @@ export const getDeviceDetails = async (req, res) => {
       },
     };
 
-    const doc = await db_connect.collection("ms_pnp_data").findOne(query);
+    const doc = await db_connect.collection("pe_devices_config").findOne({ pe_ip: ip });
 
     if (!doc) return res.status(404).json({ error: "Device not found" });
 
-    const matchedDevice = doc.PE_DEVICE_DAY_0.find(dev =>
-      (!hostname || dev.pe_hostname === hostname) &&
-      (!ip || dev.pe_ip === ip) &&
-      (!site || dev.list_of_floor === site)
-    );
+    // const matchedDevice = doc.PE_DEVICE_DAY_0.find(dev =>
+    //   (!hostname || dev.pe_hostname === hostname) &&
+    //   (!ip || dev.pe_ip === ip) &&
+    //   (!site || dev.list_of_floor === site)
+    // );
 
-    if (!matchedDevice) return res.status(404).json({ error: "Device not matched in array" });
+    if (!doc) return res.status(404).json({ error: "Device not matched in array" });
 
-    res.json(matchedDevice);
+    res.json(doc);
   } catch (err) {
     console.error("Error in getDeviceDetails:", err);
     res.status(500).json({ error: "Internal Server Error" });
@@ -1116,25 +1114,20 @@ export const getDeviceDetails = async (req, res) => {
 export const getAllLocations = async (req, res) => {
     try {
         const db = dbo && dbo.getDb();
-        const collection = db.collection('ms_pnp_data');
+        const collection = db.collection('pe_devices_config');
 
-        const document = await collection.findOne({name: 'DAY0_devices'});
-        if (!document) {
+        const documents = await collection.find({}).toArray();
+        if (documents.length === 0) {
             return res.status(404).json({ success: false, message: 'No data found' });
         }
 
         let locations = new Set();
 
-        for (const sheet in document) {
-            const rows = document[sheet];
-            if (Array.isArray(rows)) {
-                rows.forEach(r => {
-                    if (r.region) {
-                        locations.add(r.region.trim());
-                    }
-                });
+        documents.forEach(r => {
+            if (r.region) {
+                locations.add(r.region.trim());
             }
-        }
+        });
 
         return res.status(200).json({
             success: true,
@@ -1160,28 +1153,24 @@ export const getDevicesByLocation = async (req, res) => {
 
     try {
         const db = dbo && dbo.getDb();
-        const collection = db.collection('ms_pnp_data');
+        const collection = db.collection('pe_devices_config');
 
-        const document = await collection.findOne({name: 'DAY0_devices'});
-        if (!document) {
+        const documents = await collection.find({}).toArray();
+        if (!documents.length === 0) {
             return res.status(404).json({ success: false, message: 'No data found' });
         }
 
         let devices = [];
 
-        for (const sheet in document) {
-            const rows = document[sheet];
-            if (Array.isArray(rows)) {
-                const filtered = rows.filter(r => 
-                    r.region?.trim().toLowerCase() === location.trim().toLowerCase() &&
-                    r.pe_ip && r.pe_hostname
-                );
-                devices = devices.concat(filtered.map(r => ({
-                    peIP: r.pe_ip,
-                    hostname: r.pe_hostname
-                })));
-            }
-        }
+        let filtered = documents.filter(r => 
+            r.region?.trim().toLowerCase() === location.trim().toLowerCase() &&
+            r.pe_ip && r.pe_hostname
+        );
+
+        devices = devices.concat(filtered.map(r => ({
+            peIP: r.pe_ip,
+            hostname: r.pe_hostname
+        })));
 
         return res.status(200).json({
             success: true,
@@ -1211,44 +1200,42 @@ export const getDeviceInfo = async (req, res) => {
         }
 
         const db = dbo && dbo.getDb();
-        const collection = db.collection('ms_pnp_data');
+        const collection = db.collection('pe_devices_config');
 
-        const document = await collection.findOne({ name: 'DAY0_devices' }, { sort: { _id: -1 } });
+        const document = await collection.findOne({ pe_ip:pe_ip});
 
         if (!document) {
             return res.status(404).json({ success: false, message: 'No data found' });
         }
 
-        for (const sheet in document) {
-            const rows = document[sheet];
-            if (Array.isArray(rows)) {
-                const found = rows.find(r => {
-                    return (pe_ip && r.pe_ip === pe_ip) || (hostname && r.hostname === hostname);
-                });
-
-                if (found) {
-                    const metadata = await db.collection("ms_cmdb_devices").findOne({
-                        managementip: found.pe_ip,
-                    });
-        //                     if (!metadata) {
-        //     return res.status(404).json({ success: false, message: 'No data found' });
+        // for (const sheet in document) {
+        //     const rows = document[sheet];
+        //     if (Array.isArray(rows)) {
+                
+        //     }
         // }
-                    return res.status(200).json({
-                        success: true,
-                        data: {
-                            region: metadata?.region || null,
-                            site: metadata?.site || '',
-                            site_plus: metadata?.["site+"] || '',
-                            floor: found.list_of_floor,
-                            "PE": found.pe_hostname || null,
-                            "IP": found.pe_ip || null,
-                            "Serial": metadata?.serial_number || '',
-                            vlan: found.vlan,
-                            reserved_seed_ports: found.reserved_seed_ports || null
-                        }
-                    });
+
+        const found  = document
+
+        if (found) {
+            const metadata = await db.collection("ms_cmdb_devices").findOne({
+                managementip: found.pe_ip,
+            });
+            
+            return res.status(200).json({
+                success: true,
+                data: {
+                    region: metadata?.region || null,
+                    site: metadata?.site || '',
+                    site_plus: metadata?.["site+"] || '',
+                    floor: found.list_of_floor,
+                    "PE": found.pe_hostname || null,
+                    "IP": found.pe_ip || null,
+                    "Serial": metadata?.serial_number || '',
+                    vlan: found.vlan,
+                    reserved_seed_ports: found.reserved_seed_ports || null
                 }
-            }
+            });
         }
 
         return res.status(404).json({ success: false, message: "Device not found" });
