@@ -2,7 +2,7 @@ import express from "express";
 import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot, getPnpDevices, getFloorValue, getTemplatesByFloor, getDeviceDetails, getAllLocations, getDevicesByLocation, getDeviceInfo} from "../controller/Onboarding.js";
 // import { authenticate, authorizeRoles} from '../../auth.js';
 // import { dnacDataDetail, insertDeviceInDnac, onboardDeviceDetails } from "../controller/Onboarding_Portal/Onboarding.js";
-import { configurationDetails, configureDevice, configureDeviceInISE, deployDefaultGateway, deviceDetails, getDeviceBySerialOrIP, getDeviceStatus, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf} from "../controller/afterOnboardingController.js";
+import { configurationDetails, configureDevice, configureDeviceInISE, deleteDayNConfigById, deleteDeviceById, deployDefaultGateway, deviceDetails, getAllDayNConfigs, getAllDevices, getDeviceBySerialOrIP, getDeviceStatus, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf, updateDayNConfigById, updateDeviceById} from "../controller/afterOnboardingController.js";
 
 
 const router = express.Router();
@@ -48,6 +48,20 @@ router.get('/device-status',getDeviceStatus );
 router.get('/getDeviceBySerialOrIP',getDeviceBySerialOrIP );
 
 
+
+// GET all devices
+router.get('/pe-devices', getAllDevices);
+
+// PUT to edit a device by ID
+router.put('/pe-devices/:id', updateDeviceById);
+
+// DELETE a device by ID
+router.delete('/pe-devices/:id', deleteDeviceById);
+
+
+router.get('/dayn-configs', getAllDayNConfigs);
+router.put('/dayn-configs/:id', updateDayNConfigById);
+router.delete('/dayn-configs/:id', deleteDayNConfigById);
 
 
 

@@ -1310,3 +1310,101 @@ export const getDeviceBySerialOrIP = async (req, res) => {
     }
 };
 
+export const getAllDevices = async (req, res) => {
+  try {
+    const db_connect = dbo && dbo.getDb();
+    const devices = await db_connect.collection("pe_devices_config").find({}).toArray();
+    res.status(200).json({devices, message: 'Devices fetched successfully', status: true});
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch devices', error, status: false });
+  }
+};
+
+export const updateDeviceById = async (req, res) => {
+  const { id } = req.params;
+  const updateData = req.body;
+
+  try {
+        const db_connect = dbo && dbo.getDb();
+    const result = await db_connect.collection("pe_devices_config").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Device not found', status: false });
+    }
+
+    res.status(200).json({ message: 'Device updated successfully', status: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update device', error , status: false});
+  }
+};
+
+export const deleteDeviceById = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+        const db_connect = dbo && dbo.getDb();
+    const result = await db_connect.collection("pe_devices_config").deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Device not found' , status: false });
+    }
+
+    res.status(200).json({ message: 'Device deleted successfully', status: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to delete device', error, status: false });
+  }
+};
+
+
+export const getAllDayNConfigs = async (req, res) => {
+  try {
+        const db_connect = dbo && dbo.getDb();
+    const configs = await db_connect.collection("dayN_configs").find({}).toArray();
+    res.status(200).json(configs);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch DayN configs', error });
+  }
+};
+
+export const updateDayNConfigById = async (req, res) => {
+  const { id } = req.params;
+  const updateData = req.body;
+
+  try {
+        const db_connect = dbo && dbo.getDb();
+    const result = await db_connect.collection("dayN_configs").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Config not found', status: false });
+    }
+
+    res.status(200).json({ message: 'Config updated successfully', status: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update config', error , status: false });
+  }
+};
+
+export const deleteDayNConfigById = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+        const db_connect = dbo && dbo.getDb();
+    const result = await db_connect.collection("dayN_configs").deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Config not found', status: false });
+    }
+
+    res.status(200).json({ message: 'Config deleted successfully', status: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to delete config', error , status: false  });
+  }
+};
