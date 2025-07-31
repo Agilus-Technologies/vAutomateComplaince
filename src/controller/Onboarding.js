@@ -4,13 +4,14 @@ import https from "https";
 import logger from '../../logger.js';
 // import onboardingModel from "../../model/onboardingModel.js"
 import dbo from "../db/conn.js";
-import { commonCredentials, execute_templates } from '../helper/dnacHelper.js';
+import { commonCredentials, execute_templates, run_show_command_on_device } from '../helper/dnacHelper.js';
 // import setUPModel from '../../model/setup_model.js';
 // import inventoryModel from '../../model/inventoryModel.js';
 import axios from "axios";
 import onboardingModel from '../model/onboardingModel.js';
 // import similarity from 'string-similarity';
 import semver from 'semver';
+import { log } from 'console';
 
 
 
@@ -210,48 +211,113 @@ export const dnacDeviceInterfaces = async (req, res) => {
 //         }
 //         return res.json(msgs)
 //     } catch (err) {
-//         let errorMsg = { msg: `Error msg in configDevicesInDnac:${err}`, status: false }
-//         logger.error(errorMsg)
-//         console.log(errorMsg)
-//     }
-// };
+    //         let errorMsg = { msg: `Error msg in configDevicesInDnac:${err}`, status: false }
+    //         logger.error(errorMsg)
+    //         console.log(errorMsg)
+    //     }
+    // };
+    
+    function normalizeInterfaceName(shortName) {
+        if (shortName.startsWith("Gi")) return shortName.replace("Gi", "GigabitEthernet");
+        if (shortName.startsWith("Te")) return shortName.replace("Te", "TenGigabitEthernet");
+        if (shortName.startsWith("Fa")) return shortName.replace("Fa", "FastEthernet");
+        if (shortName.startsWith("Ap")) return shortName.replace("Ap", "AppGigabitEthernet");
+        return shortName; // fallback
+    }
+function getStormControlValue(rawOutput) {
+    const lines = rawOutput.split('\n');
+    const stormValues = {};
+
+    // Find header line
+    const headerLine = lines.find(line => line.includes("Port") && line.includes("Speed"));
+    const headerIndex = lines.indexOf(headerLine);
+
+    if (headerIndex === -1) {
+        console.error("❌ Header not found");
+        return stormValues;
+    }
+
+    // Use regex to find start indexes of each column
+    const headerCols = [...headerLine.matchAll(/\S+/g)].map(match => match.index);
+
+    const portPos = headerCols[0];
+    const namePos = headerCols[1];
+    const statusPos = headerCols[2];
+    const vlanPos = headerCols[3];
+    const duplexPos = headerCols[4];
+    const speedPos = headerCols[5];
+    const typePos = headerCols[6];
+
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+
+        const iface = line.slice(portPos, namePos).trim();
+        const speed = line.slice(speedPos, typePos).trim().toLowerCase();
+
+        console.log(`Processing interface: ${iface}, Speed: ${speed}`);
+        const normalizedIface = normalizeInterfaceName(iface);  // 👈 Add this
+
+        let value = 0.03;
+
+        if (speed.includes("10g") || speed.includes("20g") || speed.includes("25g")) {
+            value = 0.30;
+        } else if (speed.includes("1000") || speed.includes("a-1000") || speed.includes("-1000") || speed === "auto") {
+            value = 3.0;
+        }
+
+        stormValues[normalizedIface] = value;
+    }
+
+    // console.log(stormValues, "📂 Storm Values:");
+    return stormValues;
+}
 
 
-const configuration = (datass) => {
+const configuration = async(datass) => {
     let configLines = [];
 
     if (!datass.cleanedData || datass.cleanedData.length === 0) return "";
-
+    const output = await run_show_command_on_device(datass.dnac, datass.device, "show interfaces status");
+    // const output = await run_show_command_on_device(datass.dnac,"10.122.1.2","show interfaces status");
+    const getstormvalue = getStormControlValue(output.output);
     datass.cleanedData.forEach((row) => {
         const ifaceStr = row.interfaceID;
         const vlan = row.vlanID;
-        const desc = datass.otherParameter || "Configured via automation";
+        const desc = datass.otherParameter || "PNP-Reserved-PORT";
 
         // Split interfaces by comma
         const interfaces = ifaceStr.split(",").map((i) => i.trim());
 
         interfaces.forEach((iface) => {
+            const normalizedIface = normalizeInterfaceName(iface);
+            const stormVal = getstormvalue?.[normalizedIface] || 0.03;
+
             let config = "";
 
             if (datass.dayOnboardingMethod.includes("Access Switch")) {
                 config = `interface ${iface}
 description ${desc}
 switchport access vlan ${vlan}
-switchport mode access
-no shutdown`;
+switchport mode access`;
             } else {
                 config = `interface ${iface}
 description ${desc}
 switchport mode trunk
-switchport trunk allowed vlan ${vlan}
-no shutdown`;
+logging event trunk-status`;
             }
+             config += `
+storm-control broadcast level ${stormVal}
+storm-control multicast level ${stormVal}
+spanning-tree guard root
+no shutdown`;
 
             configLines.push(config);
         });
     });
-
-    return configLines.join("\n\n");
+    console.log(`Generated configuration`, configLines.join("\n\n"));
+    
+    return configLines.join("\n");
 };
 
 
@@ -280,21 +346,24 @@ export const configDevicesInDnac = async (req, res) => {
         }
 
         // Extract IP and hostname from device string
-        const deviceIp = datass.device?.split(" ")[0] || "";
-        const hostnameMatch = datass.device?.match(/\((.*?)\)/);
+        const deviceIp = datass.device?.value?.split(" ")[0] || "";
+        const hostnameMatch = datass.device?.value?.match(/\((.*?)\)/);
         const hostname = hostnameMatch ? hostnameMatch[1] : "";
 
         // Update values
         datass.device = deviceIp;
         datass.hostname = hostname;
         // Generate configuration
-        let config = configuration(datass);
+        let config = await configuration(datass);
+        logger.info(config);
         if (!config || config === "") {
             return res.json({
-                msg: "Unable to generate config.",
+                msg: "Configuration not generated.",
                 status: false,
             });
         }
+        // console.log(config, "Generated Configuration");
+        
 
         datass["config"] = config;
         datass["pnpClaim"] = false; 

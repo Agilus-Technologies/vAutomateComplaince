@@ -1,7 +1,7 @@
 import logger from '../../logger.js';
 // import onboardingModel from "../../model/onboardingModel.js"
 import dbo from "../db/conn.js";
-import { dnacResponse } from '../helper/dnacHelper.js';
+import { dnacResponse, run_show_command_on_device } from '../helper/dnacHelper.js';
 import https from "https";
 import axios from "axios";
 import { execute_templates } from '../helper/dnacHelper.js';
@@ -119,7 +119,7 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
             matchedPNPTemplate: matchedRecord || null,
         });
     } catch (err) {
-        console.error("Error:", err);
+        logger.error({ msg: `Error in getSiteClaimAndPnpTemplateBySourceUrl: ${err}`, error: err, status: false });
         return res.status(500).json({ error: "Internal Server Error" });
     }
 };
@@ -517,78 +517,23 @@ no shutdown
 export const configurationDetails = async (req, res) => {
     try {
         let data = req.body
-        console.log("data", req.body)
         // const db_connect = dbo && dbo.getDb();
         if (!db_connect) {
+            logger.error({ msg: "Unable to connect to database.", status: false })
             return res.send({ msg: "Unable to connect to database.", status: false })
         }
         if (!data || Object.keys(data).length == 0 || data.interfaceLevel.length == 0) {
+            logger.error({ msg: "Unable to get data from user.", status: false })
             return res.send({ msg: "Unable to get data from user.", status: false })
         }
         const { interfaceLevel } = data;
         let interfaceConfig = ""
-        // interfaceLevel.forEach((item) => {
-        //     if (item?.port_description?.toLowerCase() == "voice") {
-        //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport voice vlan ${item?.voice_vlan}\nno shutdown\n`
-        //     } else if (item?.port_description?.toLowerCase() == "voice+data") {
-        //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nswitchport voice vlan ${item?.voice_vlan}\nno shutdown\n`
-        //     } else {
-        //         interfaceConfig += `interface ${item?.interface}\ndescription ${item?.port_description}\nswitchport mode access\nswitchport access vlan ${item?.access_vlan}\nno shutdown\n`
-        //     }
-        // });
-        // interfaceLevel.forEach((item) => {
-        //     const intf = item?.interface;
-        //     const rawDesc = item?.port_description || '';
-        //     const desc = rawDesc.toLowerCase();
-        //     const accessVlan = item?.access_vlan;
-        //     const voiceVlan = item?.voice_vlan;
-
-        //     interfaceConfig += `interface ${intf}\n`;
-        //     interfaceConfig += `description "${rawDesc}"\n`;
-        //     interfaceConfig += `switchport mode access\n`;
-
-        //     if (desc.includes("voice") && desc.includes("data")) {
-        //         // Voice + Data
-        //         interfaceConfig += `switchport access vlan ${accessVlan}\n`;
-        //         interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
-
-        //     } else if (desc.includes("voice")) {
-        //         // Voice Only
-        //         interfaceConfig += `switchport voice vlan ${voiceVlan}\n`;
-
-        //     } else {
-        //         // Data or CCTV
-        //         interfaceConfig += `switchport access vlan ${accessVlan}\n`;
-        //     }
-
-        //     // Common authentication block for all ports now
-        //     interfaceConfig += `authentication event fail retry 2 action next-method\n`;
-        //     interfaceConfig += `authentication event server dead action authorize vlan ${accessVlan}\n`;
-        //     interfaceConfig += `authentication event server dead action authorize voice\n`;
-        //     interfaceConfig += `authentication event server alive action reinitialize\n`;
-        //     interfaceConfig += `authentication host-mode multi-domain\n`;
-        //     interfaceConfig += `authentication order mab dot1x\n`;
-        //     interfaceConfig += `authentication priority dot1x mab\n`;
-        //     interfaceConfig += `authentication port-control auto\n`;
-        //     interfaceConfig += `authentication violation restrict\n`;
-        //     interfaceConfig += `mab\n`;
-        //     interfaceConfig += `device-tracking attach-policy ise-tracking\n`;
-        //     interfaceConfig += `dot1x pae authenticator\n`;
-        //     interfaceConfig += `authentication open\n`;
-        //     interfaceConfig += `ip device tracking maximum 10\n`;
-        //     interfaceConfig += `no shutdown\n\n`;
-        // });
         const configOutput = generateInterfaceConfig(req.body.interfaceLevel);
-        console.log(configOutput); // final interface config
-
-
-
-
         if (!interfaceConfig) {
+            logger.error({ msg: "Unable to make interface configuration", status: false })
             return res.json({ msg: "Unable to make interface configuration", status: false })
         }
         interfaceConfig = interfaceConfig.slice(0, -1)
-        console.log("interfaceConfig", interfaceConfig)
         let dnacData = {
             config: interfaceConfig,
             dnac: data?.dnacUrl,
@@ -599,13 +544,12 @@ export const configurationDetails = async (req, res) => {
         if (excuteConfigInDnac == "SUCCESS") {
             msgs = { msg: "Device configured successfully.", status: true }
         } else {
+            logger.error({ msg: "Unable to configured device.", status: false })
             msgs = { msg: "Unable to configured device.", status: false }
         }
         let details = { ...data, config: interfaceConfig, createdAt: new Date(), updatedAt: new Date() }
-        console.log("details", details, "details")
         let saveData = await db_connect.collection('ms_interfaceConfig').insertOne(details);
         return res.json(msgs)
-
         // check device exist in ISE or not
         // let iseNetworkDevice = await networkDevice(data?.device)
         // return res.send(iseNetworkDevice)
@@ -663,26 +607,18 @@ export const validateDataFromDnac = async (dnacUrl, device) => {
 
 export const tacacsAndRadiusConf = async (req, res) => {
     try {
-
         let data = req.body
-
         const configOutput = generateInterfaceConfig(req.body.interfaceLevel);
-        // console.log(configOutput," final interface config");
-        
-
         if (data && data?.registrationData.length == 0) {
-            console.log(`Unable to get data from user.`)
             logger.error({ msg: `Unable to get data from user.`, status: false })
             let msgError = { msg: `Unable to get data from user.`, status: false }
             return res.send(msgError)
         }
         if (data && data?.device == "") {
-            console.log(`Please select device.`)
             logger.error({ msg: `Please select device.`, status: false })
             let msgError = { msg: `Please select device.`, status: false }
             return res.send(msgError)
         }
-
         let commonConfig = `aaa authentication login default group Network local\naaa authentication enable default group Network enable none\naaa authentication dot1x default group ISE\naaa authorization console\naaa authorization config-commands\naaa authorization exec default group Network local if-authenticated\naaa authorization commands 0 default group Network local if-authenticated\naaa authorization commands 1 default group Network local if-authenticated\naaa authorization commands 15 default group Network local if-authenticated\naaa authorization network default group ISE\naaa accounting send stop-record authentication failure\naaa accounting dot1x default start-stop group ISE\naaa accounting exec default start-stop group Network\naaa accounting commands 0 default start-stop group Network\naaa accounting commands 1 default start-stop group Network\naaa accounting commands 15 default start-stop group Network\naaa accounting network default start-stop group tacacs+\naaa accounting connection default start-stop group Network\naaa accounting system default start-stop group Network\naaa session-id common`
         let tacacsStatic1 = `aaa group server tacacs+ Network`
         let radiusStatic = `aaa new-model\naaa group server radius ISE`
@@ -690,7 +626,6 @@ export const tacacsAndRadiusConf = async (req, res) => {
         let radiusServerData = data?.registrationData.filter((item) => { return item.type === "radiusServer" })
         let tacacsServerData = data?.registrationData.filter((item) => { return item.type === "TACACS" })
         if (radiusServerData.length == 0 && tacacsServerData.length == 0) {
-            console.log(`Unable to get data from user.`)
             logger.error({ msg: `Unable to get data from user.`, status: false })
             let msgError = { msg: `Unable to get data from user.`, status: false }
             return res.send(msgError)
@@ -800,7 +735,7 @@ export const configureDevice = async (req, res) => {
         }
 
     } catch (error) {
-        console.error("DNAC Configuration Error:", error);
+        logger.error({ msg: `DNAC Configuration Error: ${error}`, error: error, status: false });
         return res.status(500).json({
             status: false,
             msg: "Internal Server Error",
@@ -1177,7 +1112,7 @@ export const deployDefaultGateway = async (req, res) => {
       config: 
         `ip default-gateway ${gateway_ip}`
     };
-
+//    const result ={ status: true, msg:"Default gateway IP configured successfully" }
     const result = await execute_templates(item);
 
     if (typeof result === 'string' || result.status === true) {
@@ -1192,6 +1127,35 @@ export const deployDefaultGateway = async (req, res) => {
   }
 };
 
+
+export const getCommandOutput = async (req, res) => {
+  try {
+    const { dnac, device, gateway_ip } = req.body;
+
+    if (!dnac || !device || !gateway_ip) {
+      return res.status(400).json({ msg: "Missing required fields", status: false });
+    }
+
+    const item = {
+      dnac,
+      device,
+      config: 
+        `show interfaces status`
+    };
+
+    const result = await run_show_command_on_device(dnac,device, item.config);
+
+    if (typeof result === 'string' || result.status === true) {
+      return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
+    } else {
+      return res.status(500).json({ msg: "Failed to configure default gateway", result,status: false });
+    }
+
+  } catch (error) {
+    console.error("Controller error:", error.message || error);
+    return res.status(500).json({ msg: "Internal Server Error", error: error.message });
+  }
+};
 
 export const getPnpClaimedDevices = async (req, res) => {
      try {
@@ -1286,19 +1250,66 @@ export const getDeviceStatus = async (req, res) => {
 
 
 
-export const getDeviceBySerialOrIP = async (req, res) => {
+export const getDeviceBySerial = async (req, res) => {
     try {
-        const { serialNumber, ipAddress } = req.query;
+        const { serialNumber, dnacUrl } = req.query;
 
-        if (!serialNumber && !ipAddress) {
-            return res.status(400).json({ error: "Serial number or IP address is required" });
+        if (!serialNumber) {
+            return res.status(400).json({ error: "Serial number is required" });
         }
         const db_connect = dbo && dbo.getDb();
-        const query = serialNumber
-      ? { serialNumber: serialNumber }
-      : { managementIpAddress: ipAddress };
+        const query = { serialNumber };
+        let commanCredential = await commonCredentials('', dnacUrl)
+        const { token } = commanCredential;
+        if (!token) {
+            return res.status(400).json({ error: "Failed to fetch token from DNAC" });
+        }
+        const httpsAgent = new https.Agent({
+            rejectUnauthorized: false
+        });
+        const response = await axios.get(`${dnacUrl}/dna/intent/api/v1/network-device?serialNumber=${serialNumber}`, {
+            headers: {
+                "X-Auth-Token": token
+            },
+            httpsAgent: httpsAgent
+        });
+        const device = response.data.response[0] || [];
+        const dbObject = {
+            host_name: device.hostname,
+            family: device.family,
+            device_type: device.type,
+            software_type: device.softwareType,
+            managementIpAddress: device.managementIpAddress,
+            mac_address: device.macAddress,
+            software_version: device.softwareVersion,
+            role: device.role,
+            device_id: device.id,
+            device_model: device.platformId ? [device.platformId] : [],
+            device_series: device.series,
+            serial_number: device.serialNumber,
+            site_id: '',
+            ssh_username: '',
+            ssh_password: '',
+            uptime: device.upTime,
+            created_date: device.lastUpdated || new Date().toISOString(),
+            source_url: sourceUrl,
+            source: 'DNAC',
+            reachabilityStatus: device.reachabilityStatus,
+            vendor: 'Cisco',
+            audit_device: 'false',
+            is_processing: 'DNAC',
+            is_excution_type: 'Excel',
+        };
+       
+        await db_connect.collection('ms_device').updateOne(
+            {
+                serial_number: dbObject.serial_number,
+                managementIpAddress: dbObject.managementIpAddress
+            },
+            { $set: dbObject },
+            { upsert: true }
+        );
 
-        const device = await db_connect.collection("ms_dnac_inventory").findOne(query);
 
 
     } catch (error) {

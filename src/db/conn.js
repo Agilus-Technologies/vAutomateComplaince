@@ -13,7 +13,7 @@ let connUrl = `mongodb://velocis:password@192.168.100.25:27017/${databaseName}`
 let _db;
 // mongoose.set('debug', true);
 
-
+  
 export default {
   connectToServer: async function (dbNames, urls, callback) {
     try {

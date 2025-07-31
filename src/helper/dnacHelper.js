@@ -143,16 +143,21 @@ export const getDnacToken = async (dnacCredentialsData) => {
 async function getInstanceUuid(dnacUrl, ipAddress, token) {
     try {
         const url = `${dnacUrl}/dna/intent/api/v1/network-device/ip-address/${ipAddress}`;
+        const httpsAgent = new https.Agent({
+            rejectUnauthorized: false // Accept self-signed certificate
+        });
+
         const response = await axios.get(url, {
             headers: {
                 'X-Auth-Token': token
-            }
+            },
+            httpsAgent
         });
 
-        const instanceUuid = response.data.response.instanceUuid;
+        const instanceUuid = response.  data.response.instanceUuid;
         return instanceUuid;
     } catch (error) {
-        logger.error("error in getInstanceUuid",error);
+        logger?.error?.("error in getInstanceUuid", error); // Optional chaining for safety
         console.error('Error getting instanceUuid:', error.message);
         throw new Error('Unable to fetch instanceUuid');
     }
@@ -187,7 +192,7 @@ export const commonCredentials = async (ip = "", dnacUrl = "") => {
         let token = await getDnacToken(dnacCredentials);
         if (!switchUUID && ip && dnacUrl) {
             try {
-                switchUUID = await getInstanceUuid(dnacUrl, ip, token);
+                switchUUID = await getInstanceUuid(dnacUrl, ip, token.Token);
             } catch (apiErr) {
                 console.log("Failed to fetch instanceUuid from DNAC API:", apiErr.message);
             }
@@ -492,5 +497,100 @@ export const execute_templates = async (item) => {
         return { msg: `Error in excute_template ${error.message}`, status: false };
     }
 };
+
+
+
+export const run_show_command_on_device = async (dnac_url, device_ip, command) => {
+    try {
+        let db_connect = dbo && dbo.getDb();
+        const credData = await commonCredentials(device_ip, dnac_url);
+        const { token, dnacCredentials } = credData;
+
+        if (!token) {
+            logger.error("Unable to get DNAC token in run_show_command_on_device");
+            return { msg: "Unable to get DNAC token", status: false };
+        }
+
+        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+        // Step 1: Get device UUID by IP
+        const deviceResp = await axios.get(`${dnac_url}/dna/intent/api/v1/network-device?managementIpAddress=${device_ip}`, {
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            httpsAgent
+        });
+
+        const device = deviceResp.data.response?.[0];
+        if (!device) {
+            return { msg: "Device not found with given IP", status: false };
+        }
+
+        const deviceUUID = device.id;
+
+        // Step 2: Send Command Runner request
+        const commandReq = await axios.post(`${dnac_url}/dna/intent/api/v1/network-device-poller/cli/read-request`, {
+            commands: [command],
+            deviceUuids: [deviceUUID]
+        }, {
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            httpsAgent
+        });
+
+        const taskId = commandReq.data.response.taskId;
+        console.log("📨 Command Task ID:", taskId);
+
+        // Step 3: Poll Task Status
+        let fileId = null;
+        let timeoutCounter = 0;
+
+        while (!fileId && timeoutCounter < 10) {
+            await new Promise(res => setTimeout(res, 4000));
+            const taskResp = await axios.get(`${dnac_url}/dna/intent/api/v1/task/${taskId}`, {
+                headers: {
+                    'x-auth-token': token
+                },
+                httpsAgent
+            });
+
+            const progress = taskResp.data.response?.progress;
+            if (progress && progress.includes("fileId")) {
+                const progressJson = JSON.parse(progress);
+                fileId = progressJson.fileId;
+                break;
+            }
+
+            timeoutCounter++;
+        }
+
+        if (!fileId) {
+            logger.error("Timeout: fileId not received in run_show_command_on_device");
+
+            return { msg: "Timeout: fileId not received", status: false };
+        }
+
+        // Step 4: Get command output by fileId
+        const fileResp = await axios.get(`${dnac_url}/dna/intent/api/v1/file/${fileId}`, {
+            headers: {
+                'x-auth-token': token
+            },
+            httpsAgent
+        });
+
+        const rawOutput = fileResp.data?.[0]?.commandResponses?.SUCCESS?.[command];
+        if (!rawOutput) return { msg: "Command output missing", status: false };
+
+        return { status: true, output: rawOutput };
+
+    } catch (error) {
+        console.error("Error running command:", error.message || error);
+        return { msg: `Error: ${error.message}`, status: false };
+    }
+};
+
 
 
