@@ -12,6 +12,7 @@ import onboardingModel from '../model/onboardingModel.js';
 // import similarity from 'string-similarity';
 import semver from 'semver';
 import { log } from 'console';
+import { sendError } from '../utils/errorHandler.js';
 
 
 
@@ -20,10 +21,9 @@ export const allDnacDetails = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
         let setUpDetails = await db_connect.collection('tbl_Package').find({}).project({ "dnac": 1, "_id": 0 }).toArray();
-        if (setUpDetails?.length == 0 || setUpDetails[0].dnac?.length == 0) {
-            let errorMsg = { data: [], msg: "Unable to get dnac data.", status: false }
-            logger.error(errorMsg)
-            return res.send(errorMsg)
+        if (!setUpDetails || setUpDetails.length === 0 || !setUpDetails[0].dnac || setUpDetails[0].dnac.length === 0) {
+            logger.error({ msg: "Unable to get dnac data.", status: false });
+            return sendError(res, 404, "Unable to get dnac data.");
         }
         res.json({
             data: setUpDetails && setUpDetails[0]?.dnac,
@@ -32,9 +32,8 @@ export const allDnacDetails = async (req, res) => {
         })
     } catch (err) {
         let errorMsg = { data: [], msg: `Error msg in allDnacDetails:${err}`, status: false }
-        logger.error(errorMsg)
-        console.log(errorMsg)
-        return res.send(errorMsg)
+        logger.error(errorMsg);
+        return sendError(res, 500, 'Failed to fetch DNAC details');
     }
 };
 
@@ -80,17 +79,13 @@ export const onboardDeviceDetails = async (req, res) => {
         ]).toArray();
 
         if (dnacUrlss && dnacUrlss?.length == 0) {
-            let errorMsg = { data: {}, msg: "Unable to get dnac device", status: false }
-            logger.error(errorMsg)
-            return res.send(errorMsg)
+            return sendError(res, 404, 'Unable to get DNAC device');
         }
         logger.info({ msg: "Data get successfully", status: true })
         return res.json({ data: dnacUrlss, msg: "Data get successfully", status: true })
     } catch (err) {
-        let errorMsg = { data: [], msg: `Error msg in onboardDeviceDetails:${err}`, status: false }
-        logger.error(errorMsg)
-        console.log(errorMsg)
-        return res.send(errorMsg)
+        logger.error({ msg: 'Error in onboardDeviceDetails', error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch DNAC details');
     }
 
 };
@@ -126,14 +121,16 @@ export const interfaces = async (switchUUID, dnacUrl, token) => {
                 const data = JSON.stringify(response.data);
                 // console.log("sdfg", data);
                 return data;
+                
             })
             .catch((error) => {
-                console.error(error);
+                logger.error({ msg: 'Error in interfaces', error: error, status: false });
                 return null;
             });
 
     } catch (err) {
-        console.log("Error in interfaces", err)
+        logger.error({ msg: 'Error in getting interfaces', error: err, status: false });
+        return null;
     }
 };
 
@@ -146,21 +143,23 @@ export const dnacDeviceInterfaces = async (req, res) => {
         let commanCredential = await commonCredentials(device, dnacUrl)
         const { token, cli_command_url, AUTH_API_URL, switchUUID, dnacCredentials } = commanCredential
         let interfaceDetails = await interfaces(switchUUID, dnacUrl, token)
+        logger.info(switchUUID,dnacUrl, device,"switchUUID,dnacUrl, device in dnacDeviceInterfaces");
+        logger.info(JSON.parse(interfaceDetails), "interfaceDetails in dnacDeviceInterfaces");
         let data = JSON.parse(interfaceDetails)
         if (data && data.length == 0) {
-            let errorMsg = { msg: `Unable to get port from device`, status: false }
-            logger.error(errorMsg)
-            console.log(errorMsg)
+            return sendError(res, 404, 'Unable to get port from device');
         }
         let inter = []
         for (let item of data.response) {
+            if (item.interfaceType == 'Physical' && (!item.description || item.description.trim() === '')) {
             inter.push({ portName: item.portName })
+            }
         }
+        logger.info("final response in dnacDeviceInterfaces", inter);
         res.send(inter)
     } catch (err) {
-        let errorMsg = { msg: `Error msg in dnacDeviceInterface:${err}`, status: false }
-        logger.error(errorMsg)
-        console.log(errorMsg)
+        logger.error({ msg: 'Error in dnacDeviceInterfaces', error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch device interfaces');
     }
 };
 
@@ -211,11 +210,10 @@ export const dnacDeviceInterfaces = async (req, res) => {
 //         }
 //         return res.json(msgs)
 //     } catch (err) {
-    //         let errorMsg = { msg: `Error msg in configDevicesInDnac:${err}`, status: false }
-    //         logger.error(errorMsg)
-    //         console.log(errorMsg)
-    //     }
-    // };
+//         logger.error({ msg: 'Error in configDevicesInDnac', error: err, status: false });
+//         return sendError(res, 500, 'Failed to configure device');
+//     }
+// };
     
     function normalizeInterfaceName(shortName) {
         if (shortName.startsWith("Gi")) return shortName.replace("Gi", "GigabitEthernet");
@@ -224,7 +222,7 @@ export const dnacDeviceInterfaces = async (req, res) => {
         if (shortName.startsWith("Ap")) return shortName.replace("Ap", "AppGigabitEthernet");
         return shortName; // fallback
     }
-function getStormControlValue(rawOutput) {
+export function getStormControlValue(rawOutput) {
     const lines = rawOutput.split('\n');
     const stormValues = {};
 
@@ -233,7 +231,7 @@ function getStormControlValue(rawOutput) {
     const headerIndex = lines.indexOf(headerLine);
 
     if (headerIndex === -1) {
-        console.error("❌ Header not found");
+        logger.error({ msg: '❌ Header not found in getStormControlValue', status: false });
         return stormValues;
     }
 
@@ -315,7 +313,7 @@ no shutdown`;
             configLines.push(config);
         });
     });
-    console.log(`Generated configuration`, configLines.join("\n\n"));
+    logger.info({ msg: 'Generated configuration', config: configLines.join("\n\n") });
     
     return configLines.join("\n");
 };
@@ -328,10 +326,7 @@ export const configDevicesInDnac = async (req, res) => {
 
         // Validation
         if (!datass.cleanedData || datass.cleanedData.length === 0) {
-            return res.json({
-                msg: "Missing required 'rows' data.",
-                status: false,
-            });
+            return sendError(res, 400, 'Missing required \'rows\' data.');
         }
 
         const validRows = datass.cleanedData.every(
@@ -339,10 +334,7 @@ export const configDevicesInDnac = async (req, res) => {
         );
 
         if (!validRows) {
-            return res.json({
-                msg: "Each row must have 'interfaceID' and 'vlanID'.",
-                status: false,
-            });
+            return sendError(res, 400, 'Invalid data in \'rows\'.');
         }
 
         // Extract IP and hostname from device string
@@ -357,10 +349,7 @@ export const configDevicesInDnac = async (req, res) => {
         let config = await configuration(datass);
         logger.info(config);
         if (!config || config === "") {
-            return res.json({
-                msg: "Configuration not generated.",
-                status: false,
-            });
+            return sendError(res, 400, 'Configuration not generated.');
         }
         // console.log(config, "Generated Configuration");
         
@@ -385,10 +374,8 @@ export const configDevicesInDnac = async (req, res) => {
 
         return res.json(msgs);
     } catch (err) {
-        let errorMsg = { msg: `Error msg in configDevicesInDnac: ${err}`, status: false };
-        logger.error(errorMsg);
-        console.log(errorMsg);
-        return res.json(errorMsg);
+        logger.error({ msg: 'Error in configDevicesInDnac', error: err, status: false });
+        return sendError(res, 500, 'Failed to configure device');
     }
 };
 
@@ -397,7 +384,7 @@ export const getUnClaimedDevice = async (req, res) => {
         const { dnacUrl,serialNumber } = req.body;
 
         if (!dnacUrl && !serialNumber) {
-            return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
+            return sendError(res, 400, 'Missing required fields: dnacUrl');
         }
 
         // Hardcoded IP for testing (replace with actual source)
@@ -405,7 +392,7 @@ export const getUnClaimedDevice = async (req, res) => {
         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
 
         if (!credentialsData?.token) {
-            return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
+            return sendError(res, 400, 'Failed to fetch token from DNAC');
         }
         const limit = 50;
         let offset = 0;
@@ -426,7 +413,7 @@ export const getUnClaimedDevice = async (req, res) => {
                     "Content-Type": "application/json",
                     "X-Auth-Token": credentialsData.token
                 },
-                rejectUnauthorized: false, // Use only in trusted environments with self-signed certs
+                rejectUnauthorized: false // Use only in trusted environments with self-signed certs
                 // httpsAgent: httpsAgent
             };
 
@@ -469,8 +456,8 @@ export const getUnClaimedDevice = async (req, res) => {
 
 
     } catch (err) {
-        console.error("Error in getUnClaimedDevice:", err);
-        return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
+        logger.error({ msg: "Error in getUnClaimedDevice", error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch unclaimed devices');
     }
 };
 
@@ -480,11 +467,11 @@ export const getUnClaimedDevice = async (req, res) => {
 //         const { dnacUrl } = req.body;
 
 //         if (!dnacUrl) {
-//             return res.status(400).json({ msg: "Missing required fields: dnacUrl", status: false });
+//             return sendError(res, 400, 'Missing required fields: dnacUrl');
 //         }
 //         const db_connect = dbo && dbo.getDb();
 //         if (!db_connect) {
-//             return res.json({ msg: "Database connection failed", status: false });
+//             return sendError(res, 500, 'Database connection failed');
 //         }
 
 //        const devices = await db_connect
@@ -500,8 +487,8 @@ export const getUnClaimedDevice = async (req, res) => {
 
 
 //     } catch (err) {
-//         console.error("Error in getUnClaimedDevice:", err);
-//         return res.status(500).json({ msg: "Server error in getUnClaimedDevice", error: err.message, status: false });
+//         logger.error({ msg: "Error in getUnClaimedDevice", error: err, status: false });
+//         return sendError(res, 500, 'Failed to fetch unclaimed devices');
 //     }
 // };
 
@@ -512,7 +499,7 @@ export const getDnacSites = async (req, res) => {
         const { dnacUrl } = req.body;
 
         if (!dnacUrl) {
-            return res.status(400).json({ msg: "Missing 'dnacUrl' in request body", status: false });
+            return sendError(res, 400, 'Missing \'dnacUrl\' in request body');
         }
 
         // Use dummy IP just to pass to commonCredentials
@@ -520,7 +507,7 @@ export const getDnacSites = async (req, res) => {
         const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
 
         if (!creds?.token) {
-            return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
+            return sendError(res, 400, 'Failed to fetch token from DNAC');
         }
 
         const sitePath = "/dna/intent/api/v1/site";
@@ -563,8 +550,8 @@ export const getDnacSites = async (req, res) => {
         return res.status(200).json({ status: true, data: result });
 
     } catch (err) {
-        console.error("Error in getDnacSites:", err);
-        return res.status(500).json({ msg: "Internal Server Error", error: err.message, status: false });
+        logger.error({ msg: "Error in getDnacSites", error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch DNAC sites');
     }
 };
 
@@ -580,7 +567,7 @@ export const getImageID = async (dnacUrl) => {
             method: 'get',
             maxBodyLength: Infinity,
             // url: `${dnacUrl}/dna/intent/api/v1/interface/network-device/53219b68-e9e5-45aa-89d0-84ab9d521540`,
-            url: `${dnacUrl}/dna/intent/api/v1/image/importation`,
+            url: `${dnacUrl}/dna/intent/api/v1/image/importation?isTaggedGolden=true`,
             headers: {
                 'x-auth-token': creds.token
             },
@@ -588,17 +575,17 @@ export const getImageID = async (dnacUrl) => {
         };
         return axios.request(config)
             .then((response) => {
-                const data = JSON.stringify(response.data);
+                // const data = JSON.stringify(response.data;
                 // console.log("sdfg", data);
-                return data;
+                return response.data;
             })
             .catch((error) => {
-                console.error(error);
+                logger.error({ msg: 'Error in getImageID', error: error, status: false });
                 return null;
             });
 
     } catch (err) {
-        console.log("Error in getImageID", err)
+        logger.error({ msg: 'Error in getImageID', error: err, status: false });
         return { msg: `Error in getImageID:${err}`, status: false }
     }
 };
@@ -627,12 +614,12 @@ export const getTemplate = async (dnacUrl) => {
                 return data;
             })
             .catch((error) => {
-                console.error(error);
+                logger.error({ msg: 'Error in getTemplate', error: error, status: false });
                 return null;
             });
 
     } catch (err) {
-        console.log("Error in getTemplate", err)
+        logger.error({ msg: 'Error in getTemplate', error: err, status: false });
         return { msg: `Error in getTemplate:${err}`, status: false }
     }
 };
@@ -683,9 +670,9 @@ export const pnpSiteClaim = async (data, dnac) => {
         };
 
     } catch (err) {
+        logger.error({ msg: 'Error in pnpSiteClaim', error: err, status: false });
         const statusCode = err.response?.status || 500;
-        const message = err.response?.data?.message || err.message || "Unknown error";
-
+        const message = "Error in pnpSiteClaim";
         return {
             statusCode,
             message,
@@ -702,11 +689,11 @@ export const saveClaimSiteData = async (req, res) => {
         const payload = req.body;
         for (let key in payload) {
                 if (payload[key] == null || payload[key] == "")
-                    return res.send({ msg: `Please provide ${key} value`, status: false });
+                    return sendError(res, 400, `Please provide ${key} value`);
             }
             const db_connect = dbo && dbo.getDb();
             if (!db_connect) {
-                return res.json({ msg: "Database connection failed", status: false });
+                return sendError(res, 500, 'Database connection failed');
             }
             
 
@@ -718,13 +705,16 @@ export const saveClaimSiteData = async (req, res) => {
             filterTemplate = getTemplateID.filter((item) => item.name == payload.template)
         }
         if (!filterTemplate || filterTemplate.length == 0) {
-            return res.json({ msg: "Unable to find template from dnac", status: false })
+            return sendError(res, 404, 'Unable to find template from DNAC');
         }
 
         let data = {
             "deviceId": payload?.devideID,
             "device":   payload?.device,
             "siteId": payload?.site,
+            "imageInfo": {
+                "imageId": payload?.imageUuid,
+            },
             "type": "Default",
             "configInfo": {
                 "configId": filterTemplate && filterTemplate[0] && filterTemplate[0].templateId ,
@@ -842,18 +832,8 @@ export const saveClaimSiteData = async (req, res) => {
         });
 
     } catch (err) {
-        let msgError = {
-            msg: "Internal server error in site claim",
-            error: err.message,
-            status: false
-        }
-        console.error("Error in saveClaimSiteData:", err);
-        logger.error({
-            msg: "Internal server error in site claim",
-            error: err,
-            status: false
-        })
-        return res.status(500).json(msgError);
+        logger.error({ msg: 'Error in saveClaimSiteData', error: err, status: false });
+        return sendError(res, 500, 'Failed to claim site');
     }
 };
 
@@ -871,17 +851,14 @@ export const postPnPDeviceSiteClaim = async (req, res) => {
 
         // Validate input
         if (!dnacUrl || !deviceId || !siteId || !type) {
-            return res.status(400).json({
-                msg: "Missing required fields (dnacUrl, deviceId, siteId, type)",
-                status: false
-            });
+            return sendError(res, 400, 'Missing required fields (dnacUrl, deviceId, siteId, type)');
         }
 
         // Get token from common credentials
         const dummyDeviceIp = ""; // Just needed for token lookup
         const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
         if (!creds?.token) {
-            return res.status(401).json({ msg: "Failed to get token from DNAC", status: false });
+            return sendError(res, 401, 'Failed to get token from DNAC');
         }
 
         // Prepare request body
@@ -933,12 +910,8 @@ export const postPnPDeviceSiteClaim = async (req, res) => {
         return res.status(200).json({ status: true, data: result });
 
     } catch (err) {
-        console.error("Error in postPnPDeviceSiteClaim:", err);
-        return res.status(500).json({
-            msg: "Internal server error in site claim",
-            error: err.message,
-            status: false
-        });
+        logger.error({ msg: 'Error in postPnPDeviceSiteClaim', error: err, status: false });
+        return sendError(res, 500, 'Failed to claim site');
     }
 };
 
@@ -989,16 +962,13 @@ export const sendMailForScreenShot = async (req, res) => {
                 await sendEmail({ to: mail, subject: userSubject, data: { name, html: userHtml } });
 
             } catch (error) {
-                console.error('Error sending email:', error);
+                logger.error({ msg: 'Error sending email', error: error, status: false });
             }
         });
 
     } catch (err) {
-        let errorMsg = { msg: `Error in send mail:${err.message}`, status: false }
-        logger.error(errorMsg)
-        console.log({ msg: `Error in send mail:${err}`, status: false })
-        return res.send(errorMsg)
-
+        logger.error({ msg: 'Error in send mail', error: err, status: false });
+        return sendError(res, 500, 'Failed to send email');
     }
 
 }
@@ -1013,24 +983,18 @@ export const sendMailForScreenShot = async (req, res) => {
 //         //     ...new Map(siteData.map(item => [JSON.stringify(item), item])).values()
 //         // ];
 //         if (!siteData || siteData.length == 0) {
-//             let errorMsg = { data: [], msg: "Data not found,Please insert site details.", status: false }
-//             logger.error(errorMsg)
-//             return res.send(errorMsg)
+//             return sendError(res, 404, 'Data not found,Please insert site details.');
 //         }
 
 //         let setUpDetails = await db_connect.collection('tbl_Package').find({}).project({ "dnac": 1, "_id": 0 }).toArray();
 //         if (setUpDetails?.length == 0 || setUpDetails[0].dnac?.length == 0) {
-//             let errorMsg = { data: {}, msg: "Unable to get dnac credentials", status: false }
-//             logger.error(errorMsg)
-//             return res.send(errorMsg)
+//             return sendError(res, 404, 'Unable to get dnac credentials');
 //         }
 
 //         let dnacUrlss = await db_connect.collection('ms_device').find({ "source": "DNAC" }).project({ "managementIpAddress": 1, "source_url": 1, "_id": 0, host_name: 1 }).toArray();
 //         console.log("wedrftghj", dnacUrlss)
 //         if (dnacUrlss && dnacUrlss?.length == 0) {
-//             let errorMsg = { data: {}, msg: "Unable to get dnac device", status: false }
-//             logger.error(errorMsg)
-//             return res.send(errorMsg)
+//             return sendError(res, 404, 'Unable to get dnac device');
 //         }
 //         let obj = {
 //             // siteDetails: uniqueSiteDetails,
@@ -1041,9 +1005,8 @@ export const sendMailForScreenShot = async (req, res) => {
 //         logger.info({ msg: "Data get successfully", status: true })
 //         return res.json({ data: obj, msg: "Data get successfully", status: true })
 //     } catch (err) {
-//         let errorMsg = { data: [], msg: `Error msg in onboardDeviceDetails:${err}`, status: false }
-//         logger.error(errorMsg)
-//         console.log(errorMsg)
+//         logger.error({ msg: 'Error in onboardDeviceDetails', error: err, status: false });
+//         return sendError(res, 500, 'Failed to fetch device details');
 //     }
 
 // };
@@ -1057,7 +1020,7 @@ export const getPnpDevices = async (req, res) => {
         const latestDoc = await db_connect.collection('pe_devices_config').find({}).toArray();
 
         if (!latestDoc) {
-            return res.status(404).json({ message: 'No PE_DEVICE_DAY_0 data found.' });
+            return sendError(res, 404, 'No PE_DEVICE_DAY_0 data found.');
         }
 
         const formattedDevices = latestDoc.map(device => {
@@ -1069,8 +1032,8 @@ export const getPnpDevices = async (req, res) => {
         return res.status(200).json({ devices: formattedDevices });
 
     } catch (err) {
-        console.error('Error in getPnpDevices:', err);
-        return res.status(500).json({ error: 'Internal Server Error' });
+        logger.error({ msg: 'Error in getPnpDevices', error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch PNP devices');
     }
 };
 
@@ -1082,7 +1045,7 @@ export const getFloorValue = async (req, res) => {
         const latestDoc = await db_connect.collection('pe_devices_config').find({}).toArray();
 
         if (!latestDoc) {
-            return res.status(404).json({ message: 'No PE_DEVICE_DAY_0 data found.' });
+            return sendError(res, 404, 'No PE_DEVICE_DAY_0 data found.');
         }
 
         // const formatted = latestDoc.PE_DEVICE_DAY_0.map(device => {
@@ -1094,8 +1057,8 @@ export const getFloorValue = async (req, res) => {
         return res.status(200).json({ data: formatted });
 
     } catch (err) {
-        console.error('Error in get Floor Value:', err);
-        return res.status(500).json({ error: 'Internal Server Error' });
+        logger.error({ msg: 'Error in getFloorValue', error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch floor values');
     }
 };
 
@@ -1105,14 +1068,14 @@ export const getTemplatesByFloor = async (req, res) => {
         let siteQuery = req.query.name; // ?name=Lucknow - SkillDevelopmentCenter Block 1)
 
         if (!siteQuery) {
-            return res.status(400).json({ error: 'Site name is required in query' });
+            return sendError(res, 400, 'Site name is required in query');
         }
 
         // Fetch template array from DB
         const templates = await db_connect.collection("template_mapping").find().toArray();
 
         if (templates.length === 0) {
-            return res.status(404).json({ error: 'Template data not found in DB' });
+            return sendError(res, 404, 'Template data not found in DB');
         }
 
         // Normalize siteQuery: handle "Bengaluru" → "Bangalore"
@@ -1125,14 +1088,14 @@ export const getTemplatesByFloor = async (req, res) => {
         });
 
         if (!matchedTemplates.length) {
-            return res.status(404).json({ error: 'No matching templates found for the given site' });
+            return sendError(res, 404, 'No matching templates found for the given site');
         }
 
         return res.status(200).json(matchedTemplates);
 
     } catch (err) {
-        console.error('Error in getTemplatesByFloor:', err);
-        return res.status(500).json({ error: 'Internal Server Error' });
+        logger.error({ msg: 'Error in getTemplatesByFloor', error: err, status: false });
+        return sendError(res, 500, 'Failed to fetch templates by floor');
     }
 };
 
@@ -1142,7 +1105,7 @@ export const getDeviceDetails = async (req, res) => {
   try {
     const { hostname, ip, site } = req.query;
     if (!site && !hostname && !ip) {
-      return res.status(400).json({ error: "Provide at least one search parameter" });
+      return sendError(res, 400, 'Provide at least one search parameter');
     }
 
     const db_connect = dbo.getDb(); // assume `dbo` is your db instance
@@ -1160,7 +1123,7 @@ export const getDeviceDetails = async (req, res) => {
 
     const doc = await db_connect.collection("pe_devices_config").findOne({ pe_ip: ip });
 
-    if (!doc) return res.status(404).json({ error: "Device not found" });
+    if (!doc) return sendError(res, 404, 'Device not found');
 
     // const matchedDevice = doc.PE_DEVICE_DAY_0.find(dev =>
     //   (!hostname || dev.pe_hostname === hostname) &&
@@ -1168,12 +1131,12 @@ export const getDeviceDetails = async (req, res) => {
     //   (!site || dev.list_of_floor === site)
     // );
 
-    if (!doc) return res.status(404).json({ error: "Device not matched in array" });
+    if (!doc) return sendError(res, 404, 'Device not matched in array');
 
     res.json(doc);
   } catch (err) {
-    console.error("Error in getDeviceDetails:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    logger.error({ msg: 'Error in getDeviceDetails', error: err, status: false });
+    return sendError(res, 500, 'Failed to fetch device details');
   }
 };
 
@@ -1187,7 +1150,7 @@ export const getAllLocations = async (req, res) => {
 
         const documents = await collection.find({}).toArray();
         if (documents.length === 0) {
-            return res.status(404).json({ success: false, message: 'No data found' });
+            return sendError(res, 404, 'No data found');
         }
 
         let locations = new Set();
@@ -1204,8 +1167,8 @@ export const getAllLocations = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error in getAllLocations:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        logger.error({ msg: 'Error in getAllLocations', error, status: false });
+        return sendError(res, 500, 'Failed to fetch all locations');
     }
 };
 
@@ -1217,7 +1180,7 @@ export const getDevicesByLocation = async (req, res) => {
     }
 
     if (!location) {
-        return res.status(400).json({ success: false, message: "Location query param is required" });
+        return sendError(res, 400, 'Location query param is required');
     }
 
     try {
@@ -1226,7 +1189,7 @@ export const getDevicesByLocation = async (req, res) => {
 
         const documents = await collection.find({}).toArray();
         if (!documents.length === 0) {
-            return res.status(404).json({ success: false, message: 'No data found' });
+            return sendError(res, 404, 'No data found');
         }
 
         let devices = [];
@@ -1249,8 +1212,8 @@ export const getDevicesByLocation = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error in getDevicesByLocation:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        logger.error({ msg: 'Error in getDevicesByLocation', error, status: false });
+        return sendError(res, 500, 'Failed to fetch devices by location');
     }
 };
 
@@ -1259,7 +1222,7 @@ export const getDeviceInfo = async (req, res) => {
     let { pe_ip, hostname } = req.query;
 
     if (!pe_ip && !hostname) {
-        return res.status(400).json({ success: false, message: "pe_ip or hostname is required" });
+        return sendError(res, 400, 'pe_ip or hostname is required');
     }
 
     try {
@@ -1274,7 +1237,7 @@ export const getDeviceInfo = async (req, res) => {
         const document = await collection.findOne({ pe_ip:pe_ip});
 
         if (!document) {
-            return res.status(404).json({ success: false, message: 'No data found' });
+            return sendError(res, 404, 'No data found');
         }
 
         // for (const sheet in document) {
@@ -1310,8 +1273,8 @@ export const getDeviceInfo = async (req, res) => {
         return res.status(404).json({ success: false, message: "Device not found" });
 
     } catch (error) {
-        console.error("Error in getDeviceDetails:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        logger.error({ msg: 'Error in getDeviceInfo', error, status: false });
+        return sendError(res, 500, 'Failed to fetch device information');
     }
 };
 

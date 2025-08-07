@@ -14,7 +14,7 @@ export const db_config = async (req, res) => {
         let config = await db_connect.collection("vautomate_config").find({}).toArray();
         return config
     } catch (err) {
-        console.log("Error in db_config ", err)
+        logger.error({ msg: "Error in db_config", error: err, status: false })
 
     }
 
@@ -132,12 +132,8 @@ export const getDnacToken = async (dnacCredentialsData) => {
         return jsonResult;
 
     } catch (err) {
-        console.error("Error in getDnacToken in dnacHelper", err);
-        logger.error("Error in getDnacToken in dnacHelper", err)
-        return {
-            msg: `Error in getDnacToken in dnacHelper: ${err.message || err}`,
-            status: false
-        };
+        logger.error({ msg: "Error in getDnacToken in dnacHelper", error: err, status: false });
+        return { msg: 'Failed to get DNAC token', status: false };
     }
 };
 async function getInstanceUuid(dnacUrl, ipAddress, token) {
@@ -158,7 +154,7 @@ async function getInstanceUuid(dnacUrl, ipAddress, token) {
         return instanceUuid;
     } catch (error) {
         logger?.error?.("error in getInstanceUuid", error); // Optional chaining for safety
-        console.error('Error getting instanceUuid:', error.message);
+        logger.error({ msg: "Error getting instanceUuid", error: error.message, status: false });
         throw new Error('Unable to fetch instanceUuid');
     }
 }
@@ -219,8 +215,8 @@ export const commonCredentials = async (ip = "", dnacUrl = "") => {
         return obj;
     } catch (err) {
         logger.error("error in commanCredentials",err)
-        console.log("Error in commanCredentials in dnacHelper", err)
-        let msg = `Error in commanCredentials in dnacHelper:${err}`
+        logger.error({ msg: "Error in commanCredentials in dnacHelper", error: err, status: false })
+        let msg = `Error in getting credentials from dnac`
         let msg_output = { "msg": msg, status: false }
         return msg_output;
     }
@@ -249,6 +245,7 @@ export const fileIDResponse = async (dnacUrl, device, taskOutput) => {
         };
         const response = await axios.request(config);
         if (Object.keys(response).length == 0 || response.data.length == 0 || Object.keys(response.data[0].commandResponses).length == 0 || Object.keys(response.data[0].commandResponses.SUCCESS).length == 0) {
+            logger.error(response.data[0].commandResponses,"error in fileIDResponse")
             return { data: "", msg: "Unable to get file id", status: false }
         }
         let output = response.data[0].commandResponses.SUCCESS
@@ -259,7 +256,7 @@ export const fileIDResponse = async (dnacUrl, device, taskOutput) => {
         return { data: result, msg: "data get successfully", status: true }
     } catch (err) {
         logger.error("error in fileIDResponse",err)
-        console.log("error in fileIDResponse", err)
+        logger.error({ msg: "Error in fileIDResponse", error: err, status: false })
         return { data: "", msg: `Error msg in fileIDResponse:${err.message || err}`, status: false }
     }
 };
@@ -288,6 +285,7 @@ export const taskResponse = async (dnacUrl, device, taskUrl) => {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const response = await axios.request(config);
         if (Object.keys(response).length == 0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.progress == "" || response.data.response.progress == 'CLI Runner request creation') {
+            logger.error(response,"error in taskResponse")
             return { fileId: "", msg: "Unable to get file id", status: false }
         }
         let { fileId } = JSON.parse(response.data.response.progress)
@@ -295,7 +293,7 @@ export const taskResponse = async (dnacUrl, device, taskUrl) => {
     } catch (err) {
         logger.error("error in taskResponse",err)
         let msgOutput = { fileId: "", msg: `Error in taskResponse:${err.message || err}`, status: false }
-        console.log("error in taskurl", err)
+        logger.error({ msg: "Error in taskurl", error: err, status: false })
         return msgOutput
     }
 
@@ -355,7 +353,7 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
             !response.data.response.url
         ) {
             logger.error("Failed to send ping",response)
-            return { msg: "Failed to send ping request. Please try again shortly.", status: false };
+            return { msg: "Failed to send ping request.", status: false };
         }
 
         let taskUrl = response.data.response.url
@@ -391,7 +389,7 @@ export const dnacResponse = async (dnacUrl, device, ip) => {
         return fileOutput
     } catch (err) {
         logger.error("Failed to send ping",err)
-        let msgOutput = { data: "", msg: `Ping request failed:${err.message || err}`,status:false }
+        let msgOutput = { data: "", msg: `Ping request failed`,status:false }
         return msgOutput
     }
 }
@@ -484,7 +482,7 @@ export const execute_templates = async (item) => {
         }
 
         if (response.status !== 200) {
-            console.log("Error: Request failed with status", response.status);
+            logger.error({ msg: "Error: Request failed with status", status: response.status });
             return { msg: `Request failed with status ${response.status}`, status: false };
         }
         const deployment_id = response.data.deploymentId;
@@ -493,7 +491,7 @@ export const execute_templates = async (item) => {
     } catch (error) {
         logger.error("Request failed with status",error)
 
-        console.log("Error: Request failed with status", error?.message || error);
+        logger.error({ msg: "Error: Request failed with status", error: error?.message || error, status: false });
         return { msg: `Error in excute_template ${error.message}`, status: false };
     }
 };
@@ -587,10 +585,184 @@ export const run_show_command_on_device = async (dnac_url, device_ip, command) =
         return { status: true, output: rawOutput };
 
     } catch (error) {
-        console.error("Error running command:", error.message || error);
+        logger.error({ msg: "Error running command", error: error.message || error, status: false });
         return { msg: `Error: ${error.message}`, status: false };
     }
 };
+
+
+export const callMgmtIpUpdateApi = async (item) => {
+    try {
+        const credData = await commonCredentials(item.device, item.dnac);
+        const { token, dnacCredentials } = credData;
+
+        if (!token) {
+            return { msg: "Failed to retrieve token", status: false };
+        }
+
+        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+        const config = {
+            method: 'put',
+            maxBodyLength: Infinity,
+            url: `${item.dnac}/dna/intent/api/v1/network-device`,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            data: item.config,
+            httpsAgent: httpsAgent
+        };
+
+        const response = await axios.request(config);
+
+        if (response.status === 200 || response.status === 202) {
+            return { msg: "Update request sent", data: response.data, status: true };
+        } else {
+            return { msg: `Request failed with status ${response.status}`, status: false };
+        }
+
+    } catch (error) {
+        logger.error({ msg: "Error in callMgmtIpUpdateApi", error: error.message || error, status: false });
+        return { msg: error.message, status: false };
+    }
+};
+
+
+export const callSyncDevicesApi = async (item) => {
+    try {
+        const credData = await commonCredentials(item.device, item.dnac);
+        const { token, switchUUID } = credData;
+
+        if (!token) {
+            logger.error({ msg: "Failed to retrieve DNAC token in callSyncDevicesApi", status: false });
+            return { msg: "Failed to get DNAC token. Please check your credentials or DNAC connectivity.", status: false };
+        }
+
+        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+        const config = {
+            method: 'put',
+            url: `${item.dnac}/dna/intent/api/v1/network-device/sync?forceSync=true`,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            data: [switchUUID],
+            httpsAgent
+        };
+
+        const response = await axios.request(config);
+
+        if (response.status === 200 || response.status === 202) {
+            const taskId = response.data.response.taskId;
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds before checking task status
+
+            const taskUrl = `${item.dnac}/dna/intent/api/v1/task/${taskId}`;
+            const taskConfig = {
+                method: 'get',
+                url: taskUrl,
+                headers: {
+                    'x-auth-token': token,
+                    'Content-Type': 'application/json'
+                },
+                httpsAgent
+            };
+
+            const taskResponse = await axios.request(taskConfig);
+            const taskProgress = taskResponse?.data?.response?.progress || '';
+            if (taskProgress.includes('Synced devices')) {
+                logger.info({ msg: `Device sync successful for ${item.device}`, status: true });
+                return { msg: "Device sync completed successfully.", status: true };
+            } else {
+                logger.error({ msg: `Device sync failed for ${item.device}, details: ${taskProgress}`, status: false });
+                return { msg: `Device sync did not complete successfully.}`, status: false };
+            }
+        } else {
+            logger.error({ msg: `Sync request failed with status ${response.status}.response: ${response}`, status: false });
+            return { msg: `Sync request failed with status ${response.status}. Please try again.`, status: false };
+        }
+    } catch (error) {
+        logger.error({ msg: "Exception in callSyncDevicesApi", error: error.message || error, status: false });
+        return { msg: "Error occurred while syncing device.", status: false };
+    }
+};
+
+
+export const updateMgmtAddressHelper = async (dnac, newIP, existMgmtIp) => {
+    try {
+        const credData = await commonCredentials(existMgmtIp, dnac);
+        const { token, switchUUID } = credData;
+
+        if (!token) {
+            logger.error({ msg: "Unable to get DNAC token in updateMgmtAddressHelper", status: false });
+            return { msg: "Unable to get DNAC token. Please check your credentials or DNAC connectivity.", status: false };
+        }
+        if (!switchUUID) {
+            logger.error({ msg: "Device Id not found for the given management IP", status: false });
+            return { msg: "Device Id not found. Please verify the device and try again.", status: false };
+        }
+
+        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+        const updateUrl = `${dnac}/dna/intent/api/v1/network-device/${switchUUID}/management-address`;
+        const updatePayload = { newIP };
+        const updateConfig = {
+            method: 'put',
+            url: updateUrl,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            data: updatePayload,
+            httpsAgent
+        };
+
+        const updateResponse = await axios.request(updateConfig);
+
+        if (updateResponse.status !== 202 || !updateResponse?.data?.response?.taskId) {
+            logger.error({ msg: "Failed to update management IP", status: false, response: updateResponse });
+            return { msg: "Failed to update management IP. Please verify the device and try again.", status: false };
+        }
+
+        const taskId = updateResponse.data.response.taskId;
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds before checking task status
+
+        const taskUrl = `${dnac}/dna/intent/api/v1/task/${taskId}`;
+        const taskConfig = {
+            method: 'get',
+            url: taskUrl,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            httpsAgent
+        };
+
+        const taskResponse = await axios.request(taskConfig);
+        const taskProgress = taskResponse?.data?.response?.progress || '';
+        if (taskProgress.includes('successfully')) {
+            logger.info({ msg: `Management IP updated successfully for device ${newIP}`, status: true });
+            // Call sync and log result
+            const syncResult = await callSyncDevicesApi({ device: newIP, dnac });
+            if (syncResult.status) {
+                logger.info({ msg: `Device sync successful after management IP update for ${newIP}`, status: true });
+                return { msg: "Management IP updated and device sync started successfully.", status: true };
+            } else {
+                logger.error({ msg: `Device sync failed after management IP update for ${newIP}`, error: syncResult.msg, status: false });
+                return { msg: "Management IP updated, but device sync failed. Please check device status.", status: false };
+            }
+        } else {
+            logger.error({ msg: `Task failed or incomplete: ${taskProgress}`, taskId, status: false });
+            return { msg: `Management IP update task did not complete successfully. Details: ${taskProgress}`, status: false };
+        }
+    } catch (error) {
+        console.log(error);
+        
+        logger.error({ msg: "Exception in updateMgmtAddressHelper", error: error.message || error, status: false });
+        return { msg: "Error occurred while updating management IP. Please try again later.", status: false };
+    }
+};
+
+
 
 
 

@@ -1,7 +1,7 @@
 import logger from '../../logger.js';
 // import onboardingModel from "../../model/onboardingModel.js"
 import dbo from "../db/conn.js";
-import { dnacResponse, run_show_command_on_device } from '../helper/dnacHelper.js';
+import { callMgmtIpUpdateApi, callSyncDevicesApi, dnacResponse, run_show_command_on_device, updateMgmtAddressHelper } from '../helper/dnacHelper.js';
 import https from "https";
 import axios from "axios";
 import { execute_templates } from '../helper/dnacHelper.js';
@@ -13,6 +13,9 @@ import fs from "fs"
 import path from "path"
 import jwt from 'jsonwebtoken';
 import { ObjectId } from 'mongodb';
+import { dnacDeviceInterfaces, getImageID, getStormControlValue, interfaces } from './Onboarding.js';
+import { sendError } from '../utils/errorHandler.js';
+import { log } from 'console';
 
 
 
@@ -25,9 +28,8 @@ import { ObjectId } from 'mongodb';
 //         const db_connect = dbo && dbo.getDb();
 //         let setUpDetails = await db_connect.collection('ms_device').find({ "source": "DNAC" }).toArray();
 //         if (!setUpDetails || setUpDetails?.length == 0) {
-//             let errorMsg = { data: [], msg: "Unable to get dnac data.", status: false }
-//             logger.error(errorMsg)
-//             return res.send(errorMsg)
+//             logger.error({ data: [], msg: "Unable to get dnac data.", status: false })
+//             return sendError(res, 404, 'No DNAC data found');
 //         }
 //         res.json({
 //             data: setUpDetails,
@@ -35,10 +37,8 @@ import { ObjectId } from 'mongodb';
 //             status: true
 //         })
 //     } catch (err) {
-//         let errorMsg = { data: [], msg: `Error msg in deviceDetails:${err}`, status: false }
-//         logger.error(errorMsg)
-//         console.log(errorMsg)
-//         return res.send(errorMsg)
+//         logger.error({ data: [], msg: `Error msg in deviceDetails:${err}`, status: false })
+//         return sendError(res, 500, 'Failed to process configuration details');
 //     }
 // };
 
@@ -67,7 +67,7 @@ export const deviceDetails = async (req, res) => {
         const errorMsg = { msg: `Error in getClaimedDevices: ${err}`, status: false };
         logger.error(errorMsg);
         console.log(errorMsg);
-        return res.status(500).json(errorMsg);
+        return sendError(res, 500, 'Failed to fetch claimed devices');
     }
 };
 
@@ -120,7 +120,7 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
         });
     } catch (err) {
         logger.error({ msg: `Error in getSiteClaimAndPnpTemplateBySourceUrl: ${err}`, error: err, status: false });
-        return res.status(500).json({ error: "Internal Server Error" });
+        return sendError(res, 500, 'Failed to fetch site claim and PNP template');
     }
 };
 
@@ -128,7 +128,7 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
 
 export const pingDevice = async (req, res) => {
     try {
-        // let { ip, device, dnacUrl } = req.body
+        
         let { device, dnacUrl,ip } = req.body;
         device = device?.split(" ")[0]; // Extract IP from device string
         if (!ip || !device || !dnacUrl) {
@@ -157,9 +157,9 @@ export const pingDevice = async (req, res) => {
         }
 
     } catch (err) {
-        let resultMsg = { msg: `Error in pingDevice:${err}`, status: false }
+        let resultMsg = { msg: `Failed topingDevice:${err}`, status: false }
         logger.error(resultMsg)
-        return res.send(resultMsg)
+        return res.send({ msg: `Failed to pingDevice`, status: false })
     }
 
 };
@@ -246,12 +246,12 @@ export const networkDevice = async (device) => {
         // }
     } catch (err) {
         let msgOutput = { fileId: "", msg: `Error in taskResponse:${err.message || err}`, status: false }
-        console.log("error in taskurl", err)
+        logger.error({ msg: `Error in networkDevice: ${err}`, error: err, status: false });
         return msgOutput
     }
 };
 
-const generateInterfaceConfig = (interfaceLevel) => {
+const generateInterfaceConfig = async(interfaceLevel) => {
     let interfaceConfig = "";
 
     interfaceLevel.forEach((item) => {
@@ -505,7 +505,7 @@ no shutdown
 `.trim();
             }
 
-            interfaceConfig += `\n\n`; // gap between interface blocks
+            interfaceConfig += `\n`; // gap between interface blocks
         });
     });
 
@@ -528,12 +528,16 @@ export const configurationDetails = async (req, res) => {
         }
         const { interfaceLevel } = data;
         let interfaceConfig = ""
-        const configOutput = generateInterfaceConfig(req.body.interfaceLevel);
-        if (!interfaceConfig) {
+        const cliOutput = await run_show_command_on_device(data?.dnac, data?.device, 'show interfaces status');
+        const stormValues = getStormControlValue(cliOutput);
+        console.log(stormValues, "stormValues from cli output");
+        
+        const configOutput = generateInterfaceConfig(req.body.interfaceLevel,data?.device,data.dnacUrl);
+        if (!configOutput) {
             logger.error({ msg: "Unable to make interface configuration", status: false })
             return res.json({ msg: "Unable to make interface configuration", status: false })
         }
-        interfaceConfig = interfaceConfig.slice(0, -1)
+        interfaceConfig = configOutput.slice(0, -1)
         let dnacData = {
             config: interfaceConfig,
             dnac: data?.dnacUrl,
@@ -557,7 +561,7 @@ export const configurationDetails = async (req, res) => {
         console.log(`Error in configuration:${err}`)
         logger.error({ msg: `Error in configurationDetails:${err}`, status: false })
         let msgError = { msg: `Error in configurationDetails:${err.message}`, status: false }
-        return res.send(msgError)
+        return sendError(res, 500, 'Failed to process configuration details');
     }
 
 };
@@ -599,8 +603,65 @@ export const validateDataFromDnac = async (dnacUrl, device) => {
     } catch (err) {
         console.log("Error in validateDataFromDnac", err)
         logger.error({ msg: `Error in validateDataFromDnac:${err.message}`, status: false })
-        let msgError = { msg: `Error in validateDataFromDnac:${err.message}`, status: false }
+        let msgError = { msg: `Error in validate Data From Dnac`, status: false }
         return msgError
+    }
+};
+
+function getShutdownInterfaces(interfaceLevel, deviceInterfaces) {
+  // Step 1: Extract all frontend interfaces into a Set
+  const frontendInterfaces = new Set();
+
+  interfaceLevel.forEach(entry => {
+    entry.interface.forEach(intf => {
+      frontendInterfaces.add(intf);
+    });
+  });
+
+  // Step 2: Extract portName values from deviceInterfaces
+  const deviceInterfaceSet = new Set(
+    deviceInterfaces.map(intf => intf.portName) // <-- Fixed here
+  );
+
+  // Step 3: Find interfaces that need to be shut down
+  const interfacesToShutdown = [];
+  deviceInterfaceSet.forEach(intf => {
+    if (!frontendInterfaces.has(intf)) {
+      interfacesToShutdown.push(intf);
+    }
+  });
+
+  // Step 4: Generate shutdown commands
+  const shutdownCommands = interfacesToShutdown.map(intf => {
+    return `interface ${intf}\n shutdown`;
+  });
+
+  return shutdownCommands;
+}
+
+
+
+ const getDeviceInterfaces = async (dnacUrl, device) => {
+    try {
+        // const { dnacUrl, device } = req.body;
+
+        let commanCredential = await commonCredentials(device, dnacUrl)
+        const { token, cli_command_url, AUTH_API_URL, switchUUID, dnacCredentials } = commanCredential
+        let interfaceDetails = await interfaces(switchUUID, dnacUrl, token)
+        let data = JSON.parse(interfaceDetails)
+        if (data && data.length == 0) {
+            return 'Unable to get port from device';
+        }
+        let inter = []
+        for (let item of data.response) {
+            if (item.interfaceType == 'Physical' && (!item.description || item.description.trim() === '')) {
+                inter.push({ portName: item.portName })
+            }
+        }
+        return inter;
+    } catch (err) {
+        logger.error({ msg: 'Error in dnacDeviceInterfaces', error: err, status: false });
+        return 'Failed to fetch device interfaces'
     }
 };
 
@@ -608,98 +669,105 @@ export const validateDataFromDnac = async (dnacUrl, device) => {
 export const tacacsAndRadiusConf = async (req, res) => {
     try {
         let data = req.body
-        const configOutput = generateInterfaceConfig(req.body.interfaceLevel);
+        // const cliOutput = await run_show_command_on_device(data?.dnacUrl, data?.device, 'show interfaces status');
+        // const stormValues = getStormControlValue(cliOutput);
+        // console.log(stormValues, "stormValues from cli output");
+        const deviceInterfaces = await getDeviceInterfaces(data?.dnacUrl, data?.device);
+        const shutdownInterface = getShutdownInterfaces(req.body.interfaceLevel, deviceInterfaces);
+        const shutdownConfig = shutdownInterface.join('\n'); // 🔁 Convert array to single string
+
+        const configOutput = await generateInterfaceConfig(req.body.interfaceLevel);
         if (data && data?.registrationData.length == 0) {
             logger.error({ msg: `Unable to get data from user.`, status: false })
             let msgError = { msg: `Unable to get data from user.`, status: false }
-            return res.send(msgError)
+            return sendError(res, 500, 'Failed to process configuration details');
         }
         if (data && data?.device == "") {
             logger.error({ msg: `Please select device.`, status: false })
             let msgError = { msg: `Please select device.`, status: false }
-            return res.send(msgError)
+            return sendError(res, 500, 'Failed to process configuration details');
         }
-        let commonConfig = `aaa authentication login default group Network local\naaa authentication enable default group Network enable none\naaa authentication dot1x default group ISE\naaa authorization console\naaa authorization config-commands\naaa authorization exec default group Network local if-authenticated\naaa authorization commands 0 default group Network local if-authenticated\naaa authorization commands 1 default group Network local if-authenticated\naaa authorization commands 15 default group Network local if-authenticated\naaa authorization network default group ISE\naaa accounting send stop-record authentication failure\naaa accounting dot1x default start-stop group ISE\naaa accounting exec default start-stop group Network\naaa accounting commands 0 default start-stop group Network\naaa accounting commands 1 default start-stop group Network\naaa accounting commands 15 default start-stop group Network\naaa accounting network default start-stop group tacacs+\naaa accounting connection default start-stop group Network\naaa accounting system default start-stop group Network\naaa session-id common`
-        let tacacsStatic1 = `aaa group server tacacs+ Network`
-        let radiusStatic = `aaa new-model\naaa group server radius ISE`
-        let config = "";
         let radiusServerData = data?.registrationData.filter((item) => { return item.type === "radiusServer" })
         let tacacsServerData = data?.registrationData.filter((item) => { return item.type === "TACACS" })
         if (radiusServerData.length == 0 && tacacsServerData.length == 0) {
-            logger.error({ msg: `Unable to get data from user.`, status: false })
-            let msgError = { msg: `Unable to get data from user.`, status: false }
-            return res.send(msgError)
+            logger.error({ msg: `Radius and TACACS server data is not available.`, status: false })
+            let msgError = { msg: `Radius and TACACS server data is not available.`, status: false }
+            return sendError(res, 500, 'Failed to process configuration details');
         };
+        let radiusBlock = `aaa server radius dynamic-author`;
+        let radiusServers = ``;
+        let radiusGroup = `aaa group server radius HCL-ISE`;
 
-        //********************radius server configuration***************************
-        if (radiusServerData && radiusServerData.length > 0) {
-            for (let i = 0; i < radiusServerData.length; i++) {
-                const { radiusName: name, iseServerIP: ip, key } = radiusServerData[i]
-                radiusStatic += `\n server name ${name}`
-            }
-            radiusStatic += `\naaa server radius dynamic-author`
-
-            for (let i = 0; i < radiusServerData.length; i++) {
-                const { radiusName: name, iseServerIP: ip, key } = radiusServerData[i]
-                radiusStatic += `\n client ${ip} server-key 7 ${key}`
-
-            }
-            radiusStatic += "\nradius-server attribute 6 on-for-login-auth\nradius-server attribute 8 include-in-access-req\nradius-server attribute 25 access-request include\nradius-server dead-criteria time 5 tries 2\nradius-server deadtime 10"
-            for (let i = 0; i < radiusServerData.length; i++) {
-                const { radiusName: name, iseServerIP: ip, key } = radiusServerData[i]
-                radiusStatic += `\nradius server ${name}\n address ipv4 ${ip} auth-port 1812 acct-port 1813\n key 7 ${key}`
-            }
-            config += radiusStatic
-        };
-
-        //*****************Tacacs configuration*************************
-        if (tacacsServerData && tacacsServerData.length > 0) {
-            for (let i = 0; i < tacacsServerData.length; i++) {
-                const { radiusName: name, iseServerIP: ip, key } = tacacsServerData[i]
-                tacacsStatic1 += `\n server-private ${ip} key 7 ${key} `
-            }
-            if (config) {
-                config += `\n${tacacsStatic1}\n`
-            } else {
-                config += `${tacacsStatic1}\n`
-            }
+        for (let i = 0; i < radiusServerData.length; i++) {
+            const { radiusName, iseServerIP, key } = radiusServerData[i];
+            radiusBlock += `\nclient ${iseServerIP} server-key 7 ${key}`;
+            radiusServers += `\nradius server ${radiusName}\n address ipv4 ${iseServerIP} auth-port 1812 acct-port 1813\n key 7 ${key}`;
+            radiusGroup += `\nserver name ${radiusName}`;
         }
 
-        config += commonConfig
+        radiusBlock += `radius-server attribute 6 on-for-login-auth
+radius-server attribute 8 include-in-access-req
+radius-server attribute 25 access-request include
+radius-server dead-criteria time 5 tries 2
+radius-server deadtime 10`;
+
+        let tacacsGroup = `aaa group server tacacs+ NetworkAdmins`;
+        for (let i = 0; i < tacacsServerData.length; i++) {
+            const { iseServerIP, key } = tacacsServerData[i];
+            tacacsGroup += `\nserver-private ${iseServerIP} key 7 ${key}`;
+        }
+
+        // Default config matching the client’s format
+        const defaultConfig = `aaa authentication login default group NetworkAdmins local
+aaa authentication login console line
+aaa authentication login vty1 group NetworkAdmins local
+aaa authentication login console1 local
+aaa authentication enable default group NetworkAdmins enable group NetworkAdmins
+aaa authentication dot1x default group HCL-ISE
+aaa authorization exec default group NetworkAdmins local if-authenticated
+aaa authorization exec vty1 group NetworkAdmins local if-authenticated
+aaa authorization exec console1 local if-authenticated
+aaa authorization network default group HCL-ISE
+aaa authorization commands 7 console1 local if-authenticated
+aaa authorization commands 15 console1 local if-authenticated
+aaa authorization config-commands
+aaa authorization console
+aaa accounting exec default start-stop group NetworkAdmins
+aaa accounting system default start-stop group NetworkAdmins
+aaa accounting dot1x default start-stop group HCL-ISE`;
+
+        const sourceInterface = data?.mgmtVlanL3Interface;
+        const ipInterfaceBlock = `ip tacacs source-interface ${sourceInterface}
+ip radius source-interface ${sourceInterface}`;
+
+        // Build the full config
+        const config = `
+aaa new-model
+aaa session-id common
+${defaultConfig}
+${radiusBlock}
+${radiusServers}
+${radiusGroup}
+${tacacsGroup}
+${ipInterfaceBlock}
+`;
 
         console.log("config2", config)
-        let finalConfig = `${configOutput}\n${config}`;
+        // let finalConfig = `${configOutput}\n${config}`;
+        let finalConfig = `${configOutput}\n${shutdownConfig}\n${config}`;
+
         let Data = {
             config: finalConfig,
             dnac: data?.dnacUrl,
             device: data?.device
         }
-        return res.json({ msg: "configured Created successfully.", status: true, Data }
-        )
-        // let dnacData = {
-        //     config: config,
-        //     dnac: data?.dnacUrl,
-        //     device: data?.device
-        // }
-        // let excuteConfigInDnac = await execute_templates(dnacData)
-        // let msgs = {};
-
-        // if (excuteConfigInDnac == "SUCCESS") {
-        //     msgs = { msg: "Device configured successfully.", status: true }
-        //     let validateResponse = await validateDataFromDnac(data?.dnacUrl, data?.device)
-        //     console.log(validateResponse)
-        //     logger.info(validateResponse)
-        //     return res.json(validateResponse)
-        // } else {
-        //     msgs = { msg: "Unable to configured device.", status: false }
-        //     return res.json(msgs)
-        // }
+        return res.json({ msg: "configured Created successfully.", status: true, Data })
 
     } catch (err) {
         console.log("Error in tacacsAndRadiusConf", err)
         logger.error({ msg: `Error in tacacsAndRadiusConf: ${err}`, status: false })
         let msgError = { msg: `Error in tacacsAndRadiusConf: ${err.message}`, status: false }
-        return res.send(msgError)
+        return sendError(res, 500, 'Failed to process configuration details');
     }
 };
 
@@ -738,7 +806,7 @@ export const configureDevice = async (req, res) => {
         logger.error({ msg: `DNAC Configuration Error: ${error}`, error: error, status: false });
         return res.status(500).json({
             status: false,
-            msg: "Internal Server Error",
+            msg: "Error configuring device via DNAC.",
             error: error.message
         });
     }
@@ -957,15 +1025,14 @@ export const pnpDatafromDB = async (req, res) => {
             console.log("Unbale to get pnp data from db")
             logger.error({ msg: `"Unbale to get pnp data from db"`, status: fasle })
             let msg = { msg: `"Unbale to get pnp data from db"`, status: false }
-            return res.send(msg)
+            return sendError(res, 500, 'Failed to fetch PNP data from DB');
         }
         res.json({ data: {"Sheet1":getPNPData}, status: true })
 
     } catch (err) {
-        console.log("Error in pnpDatafromDB.", err)
-        logger.error({ msg: `Error in pnpDatafromDB:${err}`, status: fasle })
-        let msg = { outputData, msg: `Error in pnpDatafromDB:${err.message}`, status: false }
-        return res.send(msg)
+        logger.error({ msg: `Error in pnpDatafromDB:${err}`, status: false });
+        let msg = { msg: `Error in pnpDatafromDB:${err.message}`, status: false };
+        return sendError(res, 500, 'Failed to fetch PNP data from DB');;
     }
 }
 
@@ -1091,8 +1158,8 @@ export const getRadiusConfiguration = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error in getRadiusConfiguration:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        logger.error({ msg: 'Error in getRadiusConfiguration', error, status: false });
+        return sendError(res, 500, 'Failed to fetch radius configuration');
     }
 };
 
@@ -1123,7 +1190,7 @@ export const deployDefaultGateway = async (req, res) => {
 
   } catch (error) {
     console.error("Controller error:", error.message || error);
-    return res.status(500).json({ msg: "Internal Server Error", error: error.message });
+    return sendError(res, 500, 'Failed to process request');
   }
 };
 
@@ -1153,7 +1220,7 @@ export const getCommandOutput = async (req, res) => {
 
   } catch (error) {
     console.error("Controller error:", error.message || error);
-    return res.status(500).json({ msg: "Internal Server Error", error: error.message });
+    return sendError(res, 500, 'Failed to process request');
   }
 };
 
@@ -1184,7 +1251,7 @@ export const getPnpClaimedDevices = async (req, res) => {
         const errorMsg = { msg: `Error in getClaimedDevices: ${err}`, status: false };
         logger.error(errorMsg);
         console.log(errorMsg);
-        return res.status(500).json(errorMsg);
+        return sendError(res, 500, 'Failed to fetch claimed devices');
     }
 };
 
@@ -1197,7 +1264,7 @@ export const getDeviceStatus = async (req, res) => {
         const credentialsData = await commonCredentials('', dnacUrl);
 
         if (!credentialsData?.token) {
-            return res.status(401).json({ msg: "Failed to fetch token from DNAC", status: false });
+            return res.status(400).json({ msg: "Failed to fetch token from DNAC", status: false });
         }
         const response = await axios.get(
             `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`,
@@ -1255,14 +1322,14 @@ export const getDeviceBySerial = async (req, res) => {
         const { serialNumber, dnacUrl } = req.query;
 
         if (!serialNumber) {
-            return res.status(400).json({ error: "Serial number is required" });
+            return sendError(res, 400, 'Serial number is required');
         }
         const db_connect = dbo && dbo.getDb();
         const query = { serialNumber };
         let commanCredential = await commonCredentials('', dnacUrl)
         const { token } = commanCredential;
         if (!token) {
-            return res.status(400).json({ error: "Failed to fetch token from DNAC" });
+            return sendError(res, 400, 'Failed to fetch token from DNAC');
         }
         const httpsAgent = new https.Agent({
             rejectUnauthorized: false
@@ -1274,6 +1341,7 @@ export const getDeviceBySerial = async (req, res) => {
             httpsAgent: httpsAgent
         });
         const device = response.data.response[0] || [];
+        logger.info(device, "Device details fetched from DNAC");
         const dbObject = {
             host_name: device.hostname,
             family: device.family,
@@ -1292,13 +1360,13 @@ export const getDeviceBySerial = async (req, res) => {
             ssh_password: '',
             uptime: device.upTime,
             created_date: device.lastUpdated || new Date().toISOString(),
-            source_url: sourceUrl,
+            source_url: device.sourceUrl || "DNAC",
             source: 'DNAC',
             reachabilityStatus: device.reachabilityStatus,
             vendor: 'Cisco',
             audit_device: 'false',
             is_processing: 'DNAC',
-            is_excution_type: 'Excel',
+            is_excution_type: 'DNAC',
         };
        
         await db_connect.collection('ms_device').updateOne(
@@ -1311,9 +1379,41 @@ export const getDeviceBySerial = async (req, res) => {
         );
 
 
+        const platformId = device.platformId ? device.platformId.trim() : null;
+        logger.info("Platform ID from DNAC is :", platformId);
 
+        if (platformId) {
+            const deviceDetails = {
+                hostname: device.hostname,
+                ip: device.managementIpAddress,
+            };
+
+            const matchingTemplates = await db_connect.collection('ms_compliance_templates').find({
+                device_series: { $in: [platformId] },
+                template_name: { $regex: /testing/i },
+                is_mandatory: "true" 
+            }).toArray();
+
+            logger.info("Matching templates found:", matchingTemplates);
+            const output = matchingTemplates.map((template) => ({
+                ...template,
+                ...deviceDetails
+            }));
+
+            logger.info("********** Matched Compliance Templates ******************** :", matchingTemplates);
+            logger.info("********** Matched Compliance Templates Output ******************** :", output);
+            return res.status(200).json({
+                message: "Device found and compliance templates matched",
+                device: output,
+                status: true
+            });
+        } else {
+            console.log("No platformId found for this device — skipping compliance match.");
+            logger.info("No platformId found for this device — skipping compliance match.");
+        }
     } catch (error) {
         console.error("Error fetching PnP device by serial number:", error.message);
+        logger.error({ msg: "Error fetching PnP device by serial number", error: error.message, status: false });
         return res.status(500).json({
             message: "Failed to retrieve device by serial number",
             error: error.message,
@@ -1327,7 +1427,8 @@ export const getAllDevices = async (req, res) => {
     const devices = await db_connect.collection("pe_devices_config").find({}).toArray();
     res.status(200).json({devices, message: 'Devices fetched successfully', status: true});
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch devices', error, status: false });
+    logger.error({ msg: 'Failed to fetch devices', error, status: false });
+    return sendError(res, 500, 'Failed to fetch devices');
   }
 };
 
@@ -1343,12 +1444,13 @@ export const updateDeviceById = async (req, res) => {
     );
 
     if (result.matchedCount === 0) {
-      return res.status(404).json({ message: 'Device not found', status: false });
+      return sendError(res, 404, 'Device not found');
     }
 
     res.status(200).json({ message: 'Device updated successfully', status: true });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to update device', error , status: false});
+    logger.error({ msg: 'Failed to update device', error, status: false });
+    return sendError(res, 500, 'Failed to update device');
   }
 };
 
@@ -1362,12 +1464,13 @@ export const deleteDeviceById = async (req, res) => {
     });
 
     if (result.deletedCount === 0) {
-      return res.status(404).json({ message: 'Device not found' , status: false });
+      return sendError(res, 404, 'Device not found');
     }
 
     res.status(200).json({ message: 'Device deleted successfully', status: true });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to delete device', error, status: false });
+    logger.error({ msg: 'Failed to delete device', error, status: false });
+    return sendError(res, 500, 'Failed to delete device');
   }
 };
 
@@ -1378,7 +1481,8 @@ export const getAllDayNConfigs = async (req, res) => {
     const configs = await db_connect.collection("dayN_configs").find({}).toArray();
     res.status(200).json(configs);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch DayN configs', error });
+    logger.error({ msg: 'Failed to fetch DayN configs', error, status: false });
+    return sendError(res, 500, 'Failed to fetch DayN configs');
   }
 };
 
@@ -1394,12 +1498,13 @@ export const updateDayNConfigById = async (req, res) => {
     );
 
     if (result.matchedCount === 0) {
-      return res.status(404).json({ message: 'Config not found', status: false });
+      return sendError(res, 404, 'Config not found');
     }
 
     res.status(200).json({ message: 'Config updated successfully', status: true });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to update config', error , status: false });
+    logger.error({ msg: 'Failed to update config', error, status: false });
+    return sendError(res, 500, 'Failed to update DayN config');
   }
 };
 
@@ -1411,11 +1516,189 @@ export const deleteDayNConfigById = async (req, res) => {
     const result = await db_connect.collection("dayN_configs").deleteOne({ _id: new ObjectId(id) });
 
     if (result.deletedCount === 0) {
-      return res.status(404).json({ message: 'Config not found', status: false });
+      return sendError(res, 404, 'Config not found');
     }
 
     res.status(200).json({ message: 'Config deleted successfully', status: true });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to delete config', error , status: false  });
+    logger.error({ msg: 'Failed to delete config', error, status: false });
+    return sendError(res, 500, 'Failed to delete DayN config');
   }
 };
+
+
+function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
+    logger.info("matchPidWithImageUdi", pnpPid, getImageIDResponse.response)
+  const matches = [];
+
+  const targetPid = (pnpPid || '').toUpperCase();
+
+  for (const image of getImageIDResponse.response) {
+    const rawUdi = image?.extendedAttributes?.udi;
+
+    if (!rawUdi) continue;
+
+    const decodedUdi = decodeURIComponent(rawUdi); // e.g. "PID: C9300-24P VID: V02, SN: ..."
+    logger.info("Decoded PID:", decodedUdi);
+
+    const match = decodedUdi.match(/PID:\s*([^\s]+)/);
+    const udiPid = match?.[1]?.toUpperCase();
+    logger.info(udiPid, targetPid,"matchPidWithImageUdi udiPid,targetPid ");
+    
+
+    if (udiPid === targetPid) {
+        logger.info(`✅ Match found for PID: ${udiPid}`)
+      matches.push({
+        imageUuid: image.imageUuid,
+        family: image.family,
+        displayVersion: image.displayVersion,
+        imageName: image.imageName,
+        pid: udiPid,
+      });
+    }
+
+    logger.info(`✅ No Match found for PID: ${udiPid}`)
+  }
+
+  return matches;
+}
+
+
+
+export const getGoldenImage = async (req, res) => {
+    try {
+         const {dnacUrl, pid} = req.query;
+        const goldenImage = await getImageID(dnacUrl);
+        if (!goldenImage || goldenImage.length === 0) {
+            logger.error({ msg: 'No golden image found in DNAC', status: false });
+            return sendError(res, 404, 'No golden image found in DNAC');
+        }
+        const output = matchPidWithImageUdi(pid, goldenImage);
+        
+        return res.status(200).json({ data: output, status: true });
+    } catch (error) {
+        logger.error({ msg: `Error fetching golden image: ${error}`, status: false });
+        return sendError(res, 500, 'Failed to fetch golden image');
+    }
+}
+
+
+
+export const configureVtpmode = async (req, res) => {
+    try {
+        const { dnac, device, vtpmode } = req.body;
+        
+        if (!dnac || !device || !vtpmode) {
+            return res.status(400).json({ msg: "Missing required fields", status: false });
+        }
+
+        const item = {
+            dnac,
+            device,
+            config: `vtp mode ${vtpmode}`
+        };
+
+        const result = await execute_templates(item);
+
+        if (typeof result === 'string' || result.status === true) {
+            return res.status(200).json({ msg: "VTP mode configured successfully", status: true });
+        } else {
+            return res.status(500).json({ msg: "Failed to configure VTP mode", result, status: false });
+        }
+
+    } catch (error) {
+        console.error("Controller error:", error.message || error);
+        logger.error({ msg: `Error in configureVtpmode: ${error}`, status: false });
+        return sendError(res, 500, 'Failed to process request');
+    }
+}   
+
+
+
+export const updateMgmtIpAddress = async (req, res) => {
+    try {
+        const { dnac, existMgmtIp, newMgmtIp } = req.body;
+
+        if (!dnac || !existMgmtIp || !newMgmtIp) {
+            return res.status(400).json({ msg: "Missing required fields", status: false });
+        }
+
+        const payload = {
+            dnac,
+            device: "",
+            config: {
+                updateMgmtIPaddressList: [
+                    {
+                        existMgmtIpAddress: existMgmtIp,
+                        newMgmtIpAddress: newMgmtIp
+                    }
+                ]
+            }
+        };
+
+        const result = await callMgmtIpUpdateApi(payload);
+
+        if (result?.status === true) {
+            return res.status(200).json({ msg: "Management IP updated successfully", status: true });
+        } else {
+            return res.status(500).json({ msg: "Failed to update Management IP", result, status: false });
+        }
+
+    } catch (error) {
+        console.error("Controller error:", error.message || error);
+        logger.error({ msg: `Error in updateMgmtIpAddress: ${error}`, status: false });
+        return sendError(res, 500, 'Failed to process request');
+    }
+}
+
+
+export const syncDevicesWithDnac = async (req, res) => {
+    try {
+        const { dnac, deviceIds } = req.body;
+
+        if (!dnac || !Array.isArray(deviceIds) || deviceIds.length === 0) {
+            return res.status(400).json({ msg: "Missing required fields: dnac and deviceIds", status: false });
+        }
+
+        const payload = {
+            dnac,
+            deviceIds
+        };
+
+        const result = await callSyncDevicesApi(payload);
+
+        if (result?.status === true) {
+            return res.status(200).json({ msg: "Device sync initiated successfully", status: true, data: result.data });
+        } else {
+            return res.status(500).json({ msg: "Failed to sync devices", result, status: false });
+        }
+
+    } catch (error) {
+        console.error("Controller error:", error.message || error);
+        logger.error({ msg: `Error in syncDevicesWithDnac: ${error}`, status: false });
+        return sendError(res, 500, 'Failed to process request');
+    }
+};
+
+export const updateDeviceMgmtAddress = async (req, res) => {
+    try {
+        const { dnac, newIP,existMgmtIp } = req.body;
+
+        if (!dnac || !newIP) {
+            return res.status(400).json({ msg: "Missing required fields", status: false });
+        }
+
+        const result = await updateMgmtAddressHelper(dnac, newIP,existMgmtIp);
+
+        if (result.status === true) {
+            return res.status(200).json({ msg: "Management IP updated successfully", taskId: result.taskId, status: true });
+        } else {
+            return res.status(500).json({ msg: result.msg || "Failed to update Management IP", status: false });
+        }
+
+    } catch (error) {
+        logger.error({ msg: `Error in updateDeviceMgmtAddress: ${error.message}`, status: false });
+        return sendError(res, 500, 'Internal server error');
+    }
+};
+

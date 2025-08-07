@@ -2,7 +2,7 @@ import express from "express";
 import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot, getPnpDevices, getFloorValue, getTemplatesByFloor, getDeviceDetails, getAllLocations, getDevicesByLocation, getDeviceInfo} from "../controller/Onboarding.js";
 // import { authenticate, authorizeRoles} from '../../auth.js';
 // import { dnacDataDetail, insertDeviceInDnac, onboardDeviceDetails } from "../controller/Onboarding_Portal/Onboarding.js";
-import { configurationDetails, configureDevice, configureDeviceInISE, deleteDayNConfigById, deleteDeviceById, deployDefaultGateway, deviceDetails, getAllDayNConfigs, getAllDevices, getCommandOutput, getDeviceBySerial, getDeviceStatus, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, tacacsAndRadiusConf, updateDayNConfigById, updateDeviceById} from "../controller/afterOnboardingController.js";
+import { configurationDetails, configureDevice, configureDeviceInISE, configureVtpmode, deleteDayNConfigById, deleteDeviceById, deployDefaultGateway, deviceDetails, getAllDayNConfigs, getAllDevices, getCommandOutput, getDeviceBySerial, getDeviceStatus, getGoldenImage, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, syncDevicesWithDnac, tacacsAndRadiusConf, updateDayNConfigById, updateDeviceById, updateDeviceMgmtAddress, updateMgmtIpAddress} from "../controller/afterOnboardingController.js";
 import { run_show_command_on_device } from "../helper/dnacHelper.js";
 
 
@@ -51,6 +51,8 @@ router.get('/getDeviceBySerial',getDeviceBySerial );
 
 router.post('/getCommandOutput', getCommandOutput);
 
+router.get('/getGoldenImage', getGoldenImage)
+
 
 
 // GET all devices
@@ -66,6 +68,20 @@ router.delete('/pe-devices/:id', deleteDeviceById);
 router.get('/dayn-configs', getAllDayNConfigs);
 router.put('/dayn-configs/:id', updateDayNConfigById);
 router.delete('/dayn-configs/:id', deleteDayNConfigById);
+
+
+router.post('/configureVtpmode', configureVtpmode);
+
+
+router.post('/updateMgmtIpAddress', updateDeviceMgmtAddress);
+
+
+router.post('/syncDevicesWithDnac', syncDevicesWithDnac);
+
+router.post('/updateDeviceMgmtAddress', updateDeviceMgmtAddress);
+
+
+
 
 
 

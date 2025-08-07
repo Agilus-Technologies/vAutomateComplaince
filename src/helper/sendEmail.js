@@ -29,11 +29,11 @@ console.log(credential,"______________________________",decryptedPassword);
       html: data.html
     });
 
-    console.log('Message sent:', info.messageId);
+    logger.info({ msg: 'Message sent', messageId: info.messageId });
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error('Error sending email:', error);
-    return { success: false, error: error.message };
+    logger.error({ msg: 'Error sending email', error: error, status: false });
+    return { success: false, message: "Failed to send email." };
   }
 };
 
