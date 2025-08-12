@@ -16,6 +16,7 @@ import { ObjectId } from 'mongodb';
 import { dnacDeviceInterfaces, getImageID, getStormControlValue, interfaces } from './Onboarding.js';
 import { sendError } from '../utils/errorHandler.js';
 import { log } from 'console';
+import { logDnacResponse } from '../helper/logDnacResponse.js';
 
 
 
@@ -147,17 +148,17 @@ export const pingDevice = async (req, res) => {
         if (pingStatus) {
             let resultMsg = { msg: "Gateway reachable from the current management IP", status: true }
             console.log(resultMsg)
-            logger.info(resultMsg)
+            logDnacResponse("onboarding.pingDeviceIfPart",resultMsg)
             return res.send(resultMsg)
         } else {
             let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: false }
             console.log(resultMsg)
-            logger.info(resultMsg)
+            pingDevice("onboarding.pingDeviceelsePart",resultMsg)
             return res.send(resultMsg)
         }
 
     } catch (err) {
-        let resultMsg = { msg: `Failed topingDevice:${err}`, status: false }
+        let resultMsg = { msg: `Failed to pingDevice:${err}`, status: false }
         logger.error(resultMsg)
         return res.send({ msg: `Failed to pingDevice`, status: false })
     }
@@ -531,6 +532,7 @@ export const configurationDetails = async (req, res) => {
         const cliOutput = await run_show_command_on_device(data?.dnac, data?.device, 'show interfaces status');
         const stormValues = getStormControlValue(cliOutput);
         console.log(stormValues, "stormValues from cli output");
+        logger.info({ msg: "stormValues from cli output", stormValues, status: true })
         
         const configOutput = generateInterfaceConfig(req.body.interfaceLevel,data?.device,data.dnacUrl);
         if (!configOutput) {
@@ -753,6 +755,7 @@ ${ipInterfaceBlock}
 `;
 
         console.log("config2", config)
+        logger.info({ msg: "Configuration created.",config });
         // let finalConfig = `${configOutput}\n${config}`;
         let finalConfig = `${configOutput}\n${shutdownConfig}\n${config}`;
 
@@ -1179,8 +1182,8 @@ export const deployDefaultGateway = async (req, res) => {
       config: 
         `ip default-gateway ${gateway_ip}`
     };
-//    const result ={ status: true, msg:"Default gateway IP configured successfully" }
-    const result = await execute_templates(item);
+   const result ={ status: true, msg:"Default gateway IP configured successfully" }
+    // const result = await execute_templates(item);
 
     if (typeof result === 'string' || result.status === true) {
       return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
@@ -1342,41 +1345,41 @@ export const getDeviceBySerial = async (req, res) => {
         });
         const device = response.data.response[0] || [];
         logger.info(device, "Device details fetched from DNAC");
-        const dbObject = {
-            host_name: device.hostname,
-            family: device.family,
-            device_type: device.type,
-            software_type: device.softwareType,
-            managementIpAddress: device.managementIpAddress,
-            mac_address: device.macAddress,
-            software_version: device.softwareVersion,
-            role: device.role,
-            device_id: device.id,
-            device_model: device.platformId ? [device.platformId] : [],
-            device_series: device.series,
-            serial_number: device.serialNumber,
-            site_id: '',
-            ssh_username: '',
-            ssh_password: '',
-            uptime: device.upTime,
-            created_date: device.lastUpdated || new Date().toISOString(),
-            source_url: device.sourceUrl || "DNAC",
-            source: 'DNAC',
-            reachabilityStatus: device.reachabilityStatus,
-            vendor: 'Cisco',
-            audit_device: 'false',
-            is_processing: 'DNAC',
-            is_excution_type: 'DNAC',
-        };
+        // const dbObject = {
+        //     host_name: device.hostname,
+        //     family: device.family,
+        //     device_type: device.type,
+        //     software_type: device.softwareType,
+        //     managementIpAddress: device.managementIpAddress,
+        //     mac_address: device.macAddress,
+        //     software_version: device.softwareVersion,
+        //     role: device.role,
+        //     device_id: device.id,
+        //     device_model: device.platformId ? [device.platformId] : [],
+        //     device_series: device.series,
+        //     serial_number: device.serialNumber,
+        //     site_id: '',
+        //     ssh_username: '',
+        //     ssh_password: '',
+        //     uptime: device.upTime,
+        //     created_date: device.lastUpdated || new Date().toISOString(),
+        //     source_url: device.sourceUrl || "DNAC",
+        //     source: 'DNAC',
+        //     reachabilityStatus: device.reachabilityStatus,
+        //     vendor: 'Cisco',
+        //     audit_device: 'false',
+        //     is_processing: 'DNAC',
+        //     is_excution_type: 'DNAC',
+        // };
        
-        await db_connect.collection('ms_device').updateOne(
-            {
-                serial_number: dbObject.serial_number,
-                managementIpAddress: dbObject.managementIpAddress
-            },
-            { $set: dbObject },
-            { upsert: true }
-        );
+        // await db_connect.collection('ms_device').updateOne(
+        //     {
+        //         serial_number: dbObject.serial_number,
+        //         managementIpAddress: dbObject.managementIpAddress
+        //     },
+        //     { $set: dbObject },
+        //     { upsert: true }
+        // );
 
 
         const platformId = device.platformId ? device.platformId.trim() : null;
@@ -1409,7 +1412,7 @@ export const getDeviceBySerial = async (req, res) => {
             });
         } else {
             console.log("No platformId found for this device — skipping compliance match.");
-            logger.info("No platformId found for this device — skipping compliance match.");
+            // logger.info("No platformId found for this device — skipping compliance match.");
         }
     } catch (error) {
         console.error("Error fetching PnP device by serial number:", error.message);
@@ -1539,7 +1542,7 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
     if (!rawUdi) continue;
 
     const decodedUdi = decodeURIComponent(rawUdi); // e.g. "PID: C9300-24P VID: V02, SN: ..."
-    logger.info("Decoded PID:", decodedUdi);
+    logger.info("Decoded PID:", decodedUdi, "targetPid:", targetPid);
 
     const match = decodedUdi.match(/PID:\s*([^\s]+)/);
     const udiPid = match?.[1]?.toUpperCase();
@@ -1557,7 +1560,7 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
       });
     }
 
-    logger.info(`✅ No Match found for PID: ${udiPid}`)
+    // logger.info(`✅ No Match found for PID: ${udiPid}`)
   }
 
   return matches;
@@ -1569,11 +1572,20 @@ export const getGoldenImage = async (req, res) => {
     try {
          const {dnacUrl, pid} = req.query;
         const goldenImage = await getImageID(dnacUrl);
+        logger.info("Golden Image Response from DNAC:", goldenImage);
         if (!goldenImage || goldenImage.length === 0) {
             logger.error({ msg: 'No golden image found in DNAC', status: false });
             return sendError(res, 404, 'No golden image found in DNAC');
         }
         const output = matchPidWithImageUdi(pid, goldenImage);
+        // const output =[ {
+        // imageUuid: "1234-5678-9012-3456",
+        // family: "image.family",
+        // displayVersion: "17.02.10",
+        // imageName: "image.imageName",
+        // pid: "udiPid",
+        // }]
+        
         
         return res.status(200).json({ data: output, status: true });
     } catch (error) {

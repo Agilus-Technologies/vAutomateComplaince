@@ -11,7 +11,7 @@ export const authenticate = async (req, res, next) => {
         } 
     
         const decoded = jwt.verify(token, JWT_SECRET_KEY);
-        console.log("decode",decoded);
+        // console.log("decode",decoded);
         const user = await User.findOne({email:decoded.email})
         if (!user || user.isLoggedOut) {
             return res.status(401).json({ 

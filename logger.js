@@ -13,28 +13,48 @@ const myFormat = printf(({ level, message, timestamp }) => {
   }
 });
 
+// Create log folder if it doesn't exist
 if (!fs.existsSync(path.join(__dirname, "logFolder"))) {
   fs.mkdirSync(path.join(__dirname, "logFolder"));
 }
 
+// Get current date and create log file name
 let today = new Date();
 let currentYear = today.getFullYear();
-let currentMonth = today.toLocaleString("default", { month: "long" });
+// Always use English month names for log file naming and parsing
+let currentMonth = today.toLocaleString("en-US", { month: "long" });
 let currentDate = today.getDate().toString().padStart(2, "0");
+let infoFile = `logFolder/${currentYear}-${currentMonth}-${currentDate}-dnac-info.log`;
+let errorFile = `logFolder/${currentYear}-${currentMonth}-${currentDate}-dnac-error.log`;
 let file = `logFolder/${currentYear}-${currentMonth}-${currentDate}-logFile.txt`;
 
-//for delete log file, only current 6 days log file avalibale in system. 
-let filenames = fs.readdirSync("logFolder")
-if (filenames && filenames.length > 5){
-  let fileNameLength = filenames.shift()
-  // let fileNameLength = filenames.slice(1)
-  if (fileNameLength.length > 0) {
-      fs.unlink(`logFolder/${fileNameLength}`, (err) => {
-        if (err) {
-          logger.error(`Error removing file: ${err}`);
+// Delete log files older than 6 months (never delete today's log file)
+{
+  const logDir = path.join(__dirname, 'logFolder');
+  const now = new Date();
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+  const logFiles = fs.readdirSync(logDir);
+
+  logFiles.forEach(fileName => {
+    // Expecting filename format: YYYY-MMMM-DD-logFile.txt (English month)
+    const match = fileName.match(/(\d{4})-([A-Za-z]+)-(\d{2})-logFile\.txt/);
+    if (match) {
+      const [_, year, monthStr, day] = match;
+      // Always use English for month parsing
+      const month = new Date(`${monthStr} 1, 2000`).getMonth();
+      const fileDate = new Date(Number(year), month, Number(day));
+      // Never delete today's log file
+      const isToday = (Number(year) === currentYear && month === today.getMonth() && Number(day) === today.getDate());
+      if (!isToday && fileDate < sixMonthsAgo) {
+        try {
+          fs.unlinkSync(path.join(logDir, fileName));
+        } catch (err) {
+          // Use console.error here because logger may not be ready yet
+          console.error(`Error removing old log file: ${fileName} - ${err}`);
         }
-      })
-  }
+      }
+    }
+  });
 }
 
 let options = {
@@ -62,7 +82,8 @@ const logger = createLogger({
   transports: [
     new transports.Console(options.console),
     new transports.File(options.verbose),
-    // new transports.File({ filename: file, level: 'info' }),
+    new transports.File({ filename: infoFile, level: 'info', format: combine(timestamp({ format: "DD-MM-YYYY HH:mm:ss" }), myFormat) }),
+    new transports.File({ filename: errorFile, level: 'error', format: combine(timestamp({ format: "DD-MM-YYYY HH:mm:ss" }), myFormat) })
   ],
 });
 

@@ -76,9 +76,9 @@ router.post('/configureVtpmode', configureVtpmode);
 router.post('/updateMgmtIpAddress', updateDeviceMgmtAddress);
 
 
-router.post('/syncDevicesWithDnac', syncDevicesWithDnac);
+// router.post('/syncDevicesWithDnac', syncDevicesWithDnac);
 
-router.post('/updateDeviceMgmtAddress', updateDeviceMgmtAddress);
+// router.post('/updateDeviceMgmtAddress', updateDeviceMgmtAddress);
 
 
 

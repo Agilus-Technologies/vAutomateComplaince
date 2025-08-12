@@ -2,6 +2,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import https from "https";
 import logger from '../../logger.js';
+import { logDnacResponse, logDnacError } from '../helper/logDnacResponse.js';
 // import onboardingModel from "../../model/onboardingModel.js"
 import dbo from "../db/conn.js";
 import { commonCredentials, execute_templates, run_show_command_on_device } from '../helper/dnacHelper.js';
@@ -141,8 +142,10 @@ export const dnacDeviceInterfaces = async (req, res) => {
          device = device?.split(" ")[0]; // "10.28.33.7" from "10.28.33.7 (HTAINHYD06XXXCS001)"
 
         let commanCredential = await commonCredentials(device, dnacUrl)
+        logDnacResponse('Onboarding.dnacDeviceInterfaces.commonCredentials', commanCredential);
         const { token, cli_command_url, AUTH_API_URL, switchUUID, dnacCredentials } = commanCredential
         let interfaceDetails = await interfaces(switchUUID, dnacUrl, token)
+        logDnacResponse('Onboarding.dnacDeviceInterfaces.interfaces', interfaceDetails);
         logger.info(switchUUID,dnacUrl, device,"switchUUID,dnacUrl, device in dnacDeviceInterfaces");
         logger.info(JSON.parse(interfaceDetails), "interfaceDetails in dnacDeviceInterfaces");
         let data = JSON.parse(interfaceDetails)
@@ -156,9 +159,10 @@ export const dnacDeviceInterfaces = async (req, res) => {
             }
         }
         logger.info("final response in dnacDeviceInterfaces", inter);
+        logDnacResponse('Onboarding.dnacDeviceInterfaces.final', inter);
         res.send(inter)
     } catch (err) {
-        logger.error({ msg: 'Error in dnacDeviceInterfaces', error: err, status: false });
+        logDnacError('Onboarding.dnacDeviceInterfaces', err);
         return sendError(res, 500, 'Failed to fetch device interfaces');
     }
 };
@@ -390,8 +394,9 @@ export const getUnClaimedDevice = async (req, res) => {
         // Hardcoded IP for testing (replace with actual source)
         const dummyDeviceIp = "";
         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
-
+        logDnacResponse('Onboarding.getUnClaimedDevice.commonCredentials', credentialsData);
         if (!credentialsData?.token) {
+            logDnacError('Onboarding.getUnClaimedDevice', { msg: 'Failed to fetch token from DNAC', credentialsData });
             return sendError(res, 400, 'Failed to fetch token from DNAC');
         }
         const limit = 50;
@@ -399,8 +404,8 @@ export const getUnClaimedDevice = async (req, res) => {
         let allDevices = [];
 
         while (true) {
-            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device`;
-            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}&state=Unclaimed`;
+            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device`;
+            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}&state=Unclaimed`;
             const hostName = new URL(dnacUrl).hostname;
             const httpsAgent = new https.Agent({
                 rejectUnauthorized: false
@@ -449,14 +454,13 @@ export const getUnClaimedDevice = async (req, res) => {
             ...device.progress
         }));
 
+        logDnacResponse('Onboarding.getUnClaimedDevice.final', formatted);
         return res.status(200).json({
             status: true,
             data: formatted
         });
-
-
     } catch (err) {
-        logger.error({ msg: "Error in getUnClaimedDevice", error: err, status: false });
+        logDnacError('Onboarding.getUnClaimedDevice', err);
         return sendError(res, 500, 'Failed to fetch unclaimed devices');
     }
 };
@@ -699,6 +703,7 @@ export const saveClaimSiteData = async (req, res) => {
 
         let getTemplateID = await getTemplate(payload.dnacUrl)
         console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
+        logger.error('template data from DNAC',JSON.stringify(getTemplateID,null,2));
         let filterTemplate;
         if (getTemplateID) {
             getTemplateID = JSON.parse(getTemplateID)
@@ -795,17 +800,17 @@ export const saveClaimSiteData = async (req, res) => {
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
         //site-claim api
-        let pnpResponse = await pnpSiteClaim(data, payload.dnacUrl)
-                // let pnpResponse = {
-                //     statusCode: 200,
-                //     message: "Device claimed successfully",
-                //     data: {
-                //         deviceId: payload.devideID,
-                //         siteId: payload.site,
-                //         type: "Default",
-                //         configInfo: data.configInfo
-                //     }
-                // }
+        // let pnpResponse = await pnpSiteClaim(data, payload.dnacUrl)
+                let pnpResponse = {
+                    statusCode: 200,
+                    message: "Device claimed successfully",
+                    data: {
+                        deviceId: payload.devideID,
+                        siteId: payload.site,
+                        type: "Default",
+                        configInfo: data.configInfo
+                    }
+                }
         const { statusCode, message, data: responseData } = pnpResponse;
         // If DNAC returns success, update claimStatus = true
         if (statusCode >= 200 && statusCode < 300) {

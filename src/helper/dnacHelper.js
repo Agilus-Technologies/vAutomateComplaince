@@ -7,6 +7,7 @@ import axios from "axios";
 import logger from '../../logger.js';
 import { log } from "console";
 import e from "express";
+import { logDnacResponse, logDnacError } from './logDnacResponse.js';
 
 export const db_config = async (req, res) => {
     try {
@@ -132,7 +133,7 @@ export const getDnacToken = async (dnacCredentialsData) => {
         return jsonResult;
 
     } catch (err) {
-        logger.error({ msg: "Error in getDnacToken in dnacHelper", error: err, status: false });
+        logDnacError('dnacHelper.getDnacToken', err);
         return { msg: 'Failed to get DNAC token', status: false };
     }
 };
@@ -149,11 +150,11 @@ async function getInstanceUuid(dnacUrl, ipAddress, token) {
             },
             httpsAgent
         });
-
-        const instanceUuid = response.  data.response.instanceUuid;
+        logger?.info?.("instanceUuid Dnac response", response.data);
+        const instanceUuid = response.data.response.instanceUuid;
         return instanceUuid;
     } catch (error) {
-        logger?.error?.("error in getInstanceUuid", error); // Optional chaining for safety
+        logger?.error?.("error in getInstanceUuid", error,dnacUrl,ipAddress); // Optional chaining for safety
         logger.error({ msg: "Error getting instanceUuid", error: error.message, status: false });
         throw new Error('Unable to fetch instanceUuid');
     }
@@ -214,8 +215,7 @@ export const commonCredentials = async (ip = "", dnacUrl = "") => {
         }
         return obj;
     } catch (err) {
-        logger.error("error in commanCredentials",err)
-        logger.error({ msg: "Error in commanCredentials in dnacHelper", error: err, status: false })
+        logDnacError('dnacHelper.commonCredentials', err);
         let msg = `Error in getting credentials from dnac`
         let msg_output = { "msg": msg, status: false }
         return msg_output;
@@ -249,14 +249,14 @@ export const fileIDResponse = async (dnacUrl, device, taskOutput) => {
             return { data: "", msg: "Unable to get file id", status: false }
         }
         let output = response.data[0].commandResponses.SUCCESS
+        logger.info("DNAC fileIDResponse output", response.data[0]);
         let result = ""
         for (let item in output) {
             result = output[item]
         }
         return { data: result, msg: "data get successfully", status: true }
     } catch (err) {
-        logger.error("error in fileIDResponse",err)
-        logger.error({ msg: "Error in fileIDResponse", error: err, status: false })
+        logDnacError('dnacHelper.fileIDResponse', err);
         return { data: "", msg: `Error msg in fileIDResponse:${err.message || err}`, status: false }
     }
 };
@@ -285,15 +285,16 @@ export const taskResponse = async (dnacUrl, device, taskUrl) => {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const response = await axios.request(config);
         if (Object.keys(response).length == 0 || Object.keys(response.data).length == 0 || Object.keys(response.data.response).length == 0 || response.data.response.progress == "" || response.data.response.progress == 'CLI Runner request creation') {
-            logger.error(response,"error in taskResponse")
+            logDnacError('dnacHelper.taskResponse', response);
             return { fileId: "", msg: "Unable to get file id", status: false }
         }
         let { fileId } = JSON.parse(response.data.response.progress)
+        logDnacResponse('dnacHelper.taskResponse', { fileId, msg: "file id get successfully", status: true });
         return { fileId, msg: "file id get successfully", status: true }
     } catch (err) {
-        logger.error("error in taskResponse",err)
+        logDnacError('dnacHelper.taskResponse', err);
         let msgOutput = { fileId: "", msg: `Error in taskResponse:${err.message || err}`, status: false }
-        logger.error({ msg: "Error in taskurl", error: err, status: false })
+        logDnacError('dnacHelper.taskResponse', { msg: "Error in taskurl", error: err, status: false })
         return msgOutput
     }
 
@@ -411,6 +412,7 @@ export const execute_templates = async (item) => {
         });
 
         let data = {
+            "forcePushTemplate": true,
             "templateId": template_id,
             "targetInfo": [
                 {
@@ -482,16 +484,14 @@ export const execute_templates = async (item) => {
         }
 
         if (response.status !== 200) {
-            logger.error({ msg: "Error: Request failed with status", status: response.status });
+            logDnacError('dnacHelper.execute_templates', { msg: "Error: Request failed with status", status: response.status });
             return { msg: `Request failed with status ${response.status}`, status: false };
         }
         const deployment_id = response.data.deploymentId;
         return deployment_id;
 
     } catch (error) {
-        logger.error("Request failed with status",error)
-
-        logger.error({ msg: "Error: Request failed with status", error: error?.message || error, status: false });
+        logDnacError('dnacHelper.execute_templates', error);
         return { msg: `Error in excute_template ${error.message}`, status: false };
     }
 };
@@ -505,7 +505,7 @@ export const run_show_command_on_device = async (dnac_url, device_ip, command) =
         const { token, dnacCredentials } = credData;
 
         if (!token) {
-            logger.error("Unable to get DNAC token in run_show_command_on_device");
+            logDnacError('dnacHelper.run_show_command_on_device', { msg: "Unable to get DNAC token" });
             return { msg: "Unable to get DNAC token", status: false };
         }
 
@@ -582,10 +582,12 @@ export const run_show_command_on_device = async (dnac_url, device_ip, command) =
         const rawOutput = fileResp.data?.[0]?.commandResponses?.SUCCESS?.[command];
         if (!rawOutput) return { msg: "Command output missing", status: false };
 
+        // Log DNAC success response
+        logDnacResponse('dnacHelper.run_show_command_on_device', { status: true, output: rawOutput });
         return { status: true, output: rawOutput };
 
     } catch (error) {
-        logger.error({ msg: "Error running command", error: error.message || error, status: false });
+        logDnacError('dnacHelper.run_show_command_on_device', error);
         return { msg: `Error: ${error.message}`, status: false };
     }
 };
@@ -623,7 +625,45 @@ export const callMgmtIpUpdateApi = async (item) => {
         }
 
     } catch (error) {
-        logger.error({ msg: "Error in callMgmtIpUpdateApi", error: error.message || error, status: false });
+        logDnacError('dnacHelper.callMgmtIpUpdateApi', error);
+        return { msg: error.message, status: false };
+    }
+};
+
+
+export const getDeviceByDeviceId = async (item) => {
+    try {
+        const credData = await commonCredentials(item.device, item.dnac);
+        const { token, dnacCredentials } = credData;
+
+        if (!token) {
+            return { msg: "Failed to retrieve token", status: false };
+        }
+
+        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+        const config = {
+            method: 'put',
+            maxBodyLength: Infinity,
+            url: `${item.dnac}/dna/intent/api/v1/network-device`,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            data: item.config,
+            httpsAgent: httpsAgent
+        };
+
+        const response = await axios.request(config);
+
+        if (response.status === 200 || response.status === 202) {
+            return { msg: "Update request sent", data: response.data, status: true };
+        } else {
+            return { msg: `Request failed with status ${response.status}`, status: false };
+        }
+
+    } catch (error) {
+        logDnacError('dnacHelper.callMgmtIpUpdateApi', error);
         return { msg: error.message, status: false };
     }
 };
@@ -635,7 +675,7 @@ export const callSyncDevicesApi = async (item) => {
         const { token, switchUUID } = credData;
 
         if (!token) {
-            logger.error({ msg: "Failed to retrieve DNAC token in callSyncDevicesApi", status: false });
+            logDnacError('dnacHelper.callSyncDevicesApi', { msg: "Failed to retrieve DNAC token in callSyncDevicesApi", status: false });
             return { msg: "Failed to get DNAC token. Please check your credentials or DNAC connectivity.", status: false };
         }
 
@@ -672,18 +712,57 @@ export const callSyncDevicesApi = async (item) => {
             const taskProgress = taskResponse?.data?.response?.progress || '';
             if (taskProgress.includes('Synced devices')) {
                 logger.info({ msg: `Device sync successful for ${item.device}`, status: true });
+                
                 return { msg: "Device sync completed successfully.", status: true };
             } else {
                 logger.error({ msg: `Device sync failed for ${item.device}, details: ${taskProgress}`, status: false });
                 return { msg: `Device sync did not complete successfully.}`, status: false };
             }
         } else {
-            logger.error({ msg: `Sync request failed with status ${response.status}.response: ${response}`, status: false });
+            logDnacError('dnacHelper.callSyncDevicesApi', { msg: `Sync request failed with status ${response.status}.response: ${response}`, status: false });
             return { msg: `Sync request failed with status ${response.status}. Please try again.`, status: false };
         }
     } catch (error) {
-        logger.error({ msg: "Exception in callSyncDevicesApi", error: error.message || error, status: false });
+        logDnacError('dnacHelper.callSyncDevicesApi', error);
         return { msg: "Error occurred while syncing device.", status: false };
+    }
+};
+
+
+export const getDeviceDetails = async (dnac, deviceIP) => {
+    try {
+        const credData = await commonCredentials(deviceIP, dnac);
+        const { token } = credData;
+
+        if (!token) {
+            logDnacError('dnacHelper.getDeviceDetails', { msg: "Failed to retrieve DNAC token in getDeviceDetails", status: false });
+            return { msg: "Failed to get DNAC token. Please check your credentials or DNAC connectivity.", status: false };
+        }
+
+        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+        const deviceUrl = `${dnac}/dna/intent/api/v1/network-device/ip-address/${deviceIP}`;
+        const config = {
+            method: 'get',
+            url: deviceUrl,
+            headers: {
+                'x-auth-token': token,
+                'Content-Type': 'application/json'
+            },
+            httpsAgent
+        };
+
+        const response = await axios.request(config);
+
+        if (response.status !== 200 || !response.data.response) {            
+            logDnacError('dnacHelper.getDeviceDetails', { msg: `Device details not found for ${deviceIP}`, status: false });
+            return { msg: `Device details not found for ${deviceIP}`, status: false };
+        }
+
+        const deviceDetails = response.data.response;
+        return deviceDetails;
+    } catch (error) {
+        logDnacError('dnacHelper.getDeviceDetails', error);
+        return { msg: "Error occurred while getting device details.", status: false };
     }
 };
 
@@ -694,11 +773,11 @@ export const updateMgmtAddressHelper = async (dnac, newIP, existMgmtIp) => {
         const { token, switchUUID } = credData;
 
         if (!token) {
-            logger.error({ msg: "Unable to get DNAC token in updateMgmtAddressHelper", status: false });
+            logDnacError('dnacHelper.updateMgmtAddressHelper', { msg: "Unable to get DNAC token in updateMgmtAddressHelper", status: false });
             return { msg: "Unable to get DNAC token. Please check your credentials or DNAC connectivity.", status: false };
         }
         if (!switchUUID) {
-            logger.error({ msg: "Device Id not found for the given management IP", status: false });
+            logDnacError('dnacHelper.updateMgmtAddressHelper', { msg: "Device Id not found for the given management IP", status: false });
             return { msg: "Device Id not found. Please verify the device and try again.", status: false };
         }
 
@@ -744,6 +823,42 @@ export const updateMgmtAddressHelper = async (dnac, newIP, existMgmtIp) => {
             // Call sync and log result
             const syncResult = await callSyncDevicesApi({ device: newIP, dnac });
             if (syncResult.status) {
+            const device = await getDeviceDetails(dnac, newIP);
+            const dbObject = {
+            host_name: device.hostname,
+            family: device.family,
+            device_type: device.type,
+            software_type: device.softwareType,
+            managementIpAddress: device.managementIpAddress,
+            mac_address: device.macAddress,
+            software_version: device.softwareVersion,
+            role: device.role,
+            device_id: device.id,
+            device_model: device.platformId ? [device.platformId] : [],
+            device_series: device.series,
+            serial_number: device.serialNumber,
+            site_id: '',
+            ssh_username: '',
+            ssh_password: '',
+            uptime: device.upTime,
+            created_date: device.lastUpdated || new Date().toISOString(),
+            source_url: device.sourceUrl || "DNAC",
+            source: 'DNAC',
+            reachabilityStatus: device.reachabilityStatus,
+            vendor: 'Cisco',
+            audit_device: 'false',
+            is_processing: 'DNAC',
+            is_excution_type: 'DNAC',
+        };
+        let db_connect = dbo && dbo.getDb();
+        await db_connect.collection('ms_device').updateOne(
+            {
+                serial_number: dbObject.serial_number,
+                managementIpAddress: dbObject.managementIpAddress
+            },
+            { $set: dbObject },
+            { upsert: true }
+        );
                 logger.info({ msg: `Device sync successful after management IP update for ${newIP}`, status: true });
                 return { msg: "Management IP updated and device sync started successfully.", status: true };
             } else {
@@ -751,13 +866,12 @@ export const updateMgmtAddressHelper = async (dnac, newIP, existMgmtIp) => {
                 return { msg: "Management IP updated, but device sync failed. Please check device status.", status: false };
             }
         } else {
-            logger.error({ msg: `Task failed or incomplete: ${taskProgress}`, taskId, status: false });
+            logDnacError('dnacHelper.updateMgmtAddressHelper', { msg: `Task failed or incomplete: ${taskProgress}`, taskId, status: false });
             return { msg: `Management IP update task did not complete successfully. Details: ${taskProgress}`, status: false };
         }
     } catch (error) {
         console.log(error);
-        
-        logger.error({ msg: "Exception in updateMgmtAddressHelper", error: error.message || error, status: false });
+        logDnacError('dnacHelper.updateMgmtAddressHelper', error);
         return { msg: "Error occurred while updating management IP. Please try again later.", status: false };
     }
 };
