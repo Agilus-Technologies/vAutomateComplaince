@@ -46,7 +46,7 @@ import { logDnacResponse } from '../helper/logDnacResponse.js';
 export const deviceDetails = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-
+        logger.info({ msg: 'DNAC deviceDetails: Fetching claimed devices', status: true });
         let claimedDevices = await db_connect
             .collection("siteclaimdata")
             .find({claimStatus:true })
@@ -77,7 +77,7 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
     try {
         const db_connect = dbo.getDb(); // get your db connection
         const snmpLocation = req.query.snmpLocation;
-
+        logger.info({ msg: 'DNAC getSiteClaimAndPnpTemplateBySourceUrl: called', snmpLocation, status: true });
         // if (!source_url) {
         //     return res.status(400).json({ error: "Missing source_url in query" });
         // }
@@ -138,6 +138,7 @@ export const pingDevice = async (req, res) => {
             return res.send({ msg: "Unable to get ip,device or dnac url ", status: false })
         }
         let finalOutput = await dnacResponse(dnacUrl, device, ip)
+        logger.info({ msg: 'DNAC pingDevice API call successful', dnacUrl, device, status: finalOutput.status });
         if (!finalOutput.status) {
             // if (Object.keys(finalOutput).length == 0 || !finalOutput.status) {
             logger.error(finalOutput)
@@ -555,6 +556,7 @@ export const configurationDetails = async (req, res) => {
         }
         let details = { ...data, config: interfaceConfig, createdAt: new Date(), updatedAt: new Date() }
         let saveData = await db_connect.collection('ms_interfaceConfig').insertOne(details);
+        logger.info({ msg: 'DNAC configurationDetails: ms_interfaceConfig inserted', status: !!saveData });
         return res.json(msgs)
         // check device exist in ISE or not
         // let iseNetworkDevice = await networkDevice(data?.device)
@@ -571,6 +573,7 @@ export const configurationDetails = async (req, res) => {
 export const validateDataFromDnac = async (dnacUrl, device) => {
     try {
         let commanCredential = await commonCredentials(device, dnacUrl)
+        logger.info({ msg: 'DNAC validateDataFromDnac: commonCredentials fetched', dnacUrl, device, status: !!commanCredential.token });
         const { token } = commanCredential
         if (token == "") {
             logger.error({ msg: `Device is configured successfully but unable to get token in validData`, status: false })
@@ -675,6 +678,7 @@ export const tacacsAndRadiusConf = async (req, res) => {
         // const stormValues = getStormControlValue(cliOutput);
         // console.log(stormValues, "stormValues from cli output");
         const deviceInterfaces = await getDeviceInterfaces(data?.dnacUrl, data?.device);
+        logger.info({ msg: 'DNAC tacacsAndRadiusConf: getDeviceInterfaces called', dnacUrl: data?.dnacUrl, device: data?.device, status: !!deviceInterfaces });
         const shutdownInterface = getShutdownInterfaces(req.body.interfaceLevel, deviceInterfaces);
         const shutdownConfig = shutdownInterface.join('\n'); // 🔁 Convert array to single string
 
@@ -793,6 +797,7 @@ export const configureDevice = async (req, res) => {
 
         const dnacData = { config, dnac: dnac, device };
         const executeResult = await execute_templates(dnacData);
+        // const executeResult = "SUCCESS";
 
         if (executeResult === "SUCCESS") {
             const validateResponse = await validateDataFromDnac(dnac, device);
@@ -1182,9 +1187,9 @@ export const deployDefaultGateway = async (req, res) => {
       config: 
         `ip default-gateway ${gateway_ip}`
     };
-   const result ={ status: true, msg:"Default gateway IP configured successfully" }
-    // const result = await execute_templates(item);
-
+//    const result ={ status: true, msg:"Default gateway IP configured successfully" }
+    const result = await execute_templates(item);
+    logger.info({ msg: 'DNAC deployDefaultGateway: execute_templates called', dnac, device, status: !!result });
     if (typeof result === 'string' || result.status === true) {
       return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
     } else {
@@ -1214,7 +1219,7 @@ export const getCommandOutput = async (req, res) => {
     };
 
     const result = await run_show_command_on_device(dnac,device, item.config);
-
+    logger.info({ msg: 'DNAC getCommandOutput: run_show_command_on_device called', dnac, device, status: !!result });
     if (typeof result === 'string' || result.status === true) {
       return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
     } else {
@@ -1279,7 +1284,7 @@ export const getDeviceStatus = async (req, res) => {
                 httpsAgent: new https.Agent({ rejectUnauthorized: false }) // If self-signed
             }
         );
-
+        logger.info({ msg: 'DNAC getDeviceStatus API call successful', dnacUrl, serialNumber, status: true });
         const device = response.data[0];
 
         if (!device) {
@@ -1332,6 +1337,7 @@ export const getDeviceBySerial = async (req, res) => {
         let commanCredential = await commonCredentials('', dnacUrl)
         const { token } = commanCredential;
         if (!token) {
+            logger.error({ msg: 'Failed to fetch token from DNAC', dnacUrl, status: false });
             return sendError(res, 400, 'Failed to fetch token from DNAC');
         }
         const httpsAgent = new https.Agent({
@@ -1343,6 +1349,7 @@ export const getDeviceBySerial = async (req, res) => {
             },
             httpsAgent: httpsAgent
         });
+        logger.info({ msg: 'DNAC getDeviceBySerial API call successful', dnacUrl, serialNumber, status: true });
         const device = response.data.response[0] || [];
         logger.info(device, "Device details fetched from DNAC");
         // const dbObject = {
@@ -1396,7 +1403,7 @@ export const getDeviceBySerial = async (req, res) => {
                 template_name: { $regex: /testing/i },
                 is_mandatory: "true" 
             }).toArray();
-
+            logger.info({ msg: 'DNAC getDeviceBySerial: ms_compliance_templates fetched', count: matchingTemplates.length, status: true });
             logger.info("Matching templates found:", matchingTemplates);
             const output = matchingTemplates.map((template) => ({
                 ...template,
@@ -1427,8 +1434,9 @@ export const getDeviceBySerial = async (req, res) => {
 export const getAllDevices = async (req, res) => {
   try {
     const db_connect = dbo && dbo.getDb();
-    const devices = await db_connect.collection("pe_devices_config").find({}).toArray();
-    res.status(200).json({devices, message: 'Devices fetched successfully', status: true});
+    const devices = await db_connect.collection("siteclaimdata").find({}).toArray();
+    logger.info({ msg: 'DNAC getAllDevices: siteclaimdata fetched', count: devices.length, status: true });
+    res.status(200).json(devices);
   } catch (error) {
     logger.error({ msg: 'Failed to fetch devices', error, status: false });
     return sendError(res, 500, 'Failed to fetch devices');
@@ -1482,6 +1490,7 @@ export const getAllDayNConfigs = async (req, res) => {
   try {
         const db_connect = dbo && dbo.getDb();
     const configs = await db_connect.collection("dayN_configs").find({}).toArray();
+    logger.info({ msg: 'DNAC getAllDayNConfigs: dayN_configs fetched', count: configs.length, status: true });
     res.status(200).json(configs);
   } catch (error) {
     logger.error({ msg: 'Failed to fetch DayN configs', error, status: false });
@@ -1531,36 +1540,56 @@ export const deleteDayNConfigById = async (req, res) => {
 
 
 function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
-    logger.info("matchPidWithImageUdi", pnpPid, getImageIDResponse.response)
+  logger.info("matchPidWithImageUdi", pnpPid, getImageIDResponse.response);
   const matches = [];
 
   const targetPid = (pnpPid || '').toUpperCase();
 
   for (const image of getImageIDResponse.response) {
+    let matched = false;
+
+    // 1️⃣ UDI check
     const rawUdi = image?.extendedAttributes?.udi;
+    if (rawUdi) {
+      const decodedUdi = decodeURIComponent(rawUdi);
+      logger.info("Decoded PID:", decodedUdi, "targetPid:", targetPid);
 
-    if (!rawUdi) continue;
+      const match = decodedUdi.match(/PID:\s*([^\s]+)/);
+      const udiPid = match?.[1]?.toUpperCase();
+      logger.info(udiPid, targetPid, "matchPidWithImageUdi udiPid,targetPid");
 
-    const decodedUdi = decodeURIComponent(rawUdi); // e.g. "PID: C9300-24P VID: V02, SN: ..."
-    logger.info("Decoded PID:", decodedUdi, "targetPid:", targetPid);
+      if (udiPid === targetPid) {
+        logger.info(`✅ Match found for PID in UDI: ${udiPid}`);
+        matched = true;
+      }
+    }
 
-    const match = decodedUdi.match(/PID:\s*([^\s]+)/);
-    const udiPid = match?.[1]?.toUpperCase();
-    logger.info(udiPid, targetPid,"matchPidWithImageUdi udiPid,targetPid ");
-    
+    // 2️⃣ applicableDevicesForImage.productId[] check
+    if (!matched && Array.isArray(image.applicableDevicesForImage)) {
+      for (const device of image.applicableDevicesForImage) {
+        if (Array.isArray(device.productId)) {
+          const found = device.productId.some(
+            pid => (pid || '').toUpperCase() === targetPid
+          );
+          if (found) {
+            logger.info(`✅ Match found in applicableDevicesForImage for PID: ${targetPid}`);
+            matched = true;
+            break;
+          }
+        }
+      }
+    }
 
-    if (udiPid === targetPid) {
-        logger.info(`✅ Match found for PID: ${udiPid}`)
+    // If matched in either place, push to results
+    if (matched) {
       matches.push({
         imageUuid: image.imageUuid,
         family: image.family,
         displayVersion: image.displayVersion,
         imageName: image.imageName,
-        pid: udiPid,
+        pid: targetPid,
       });
     }
-
-    // logger.info(`✅ No Match found for PID: ${udiPid}`)
   }
 
   return matches;
@@ -1568,31 +1597,30 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
 
 
 
+import dnacGoldenImageModel from '../model/dnacGoldenImageModel.js';
+import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../scheduler/dnacSyncScheduler.js';
+
 export const getGoldenImage = async (req, res) => {
     try {
-         const {dnacUrl, pid} = req.query;
-        const goldenImage = await getImageID(dnacUrl);
-        logger.info("Golden Image Response from DNAC:", goldenImage);
-        if (!goldenImage || goldenImage.length === 0) {
-            logger.error({ msg: 'No golden image found in DNAC', status: false });
-            return sendError(res, 404, 'No golden image found in DNAC');
+        const { dnacUrl, pid } = req.query;
+        if (!dnacUrl) {
+            logger.error({ msg: "Missing 'dnacUrl' in query", status: false });
+            return sendError(res, 400, "Missing 'dnacUrl' in query");
         }
-        const output = matchPidWithImageUdi(pid, goldenImage);
-        // const output =[ {
-        // imageUuid: "1234-5678-9012-3456",
-        // family: "image.family",
-        // displayVersion: "17.02.10",
-        // imageName: "image.imageName",
-        // pid: "udiPid",
-        // }]
-        
-        
+        const images = await dnacGoldenImageModel.find({ dnacUrl }).lean();
+        if (!images || images.length === 0) {
+            logger.error({ msg: `No golden image found in DB for ${dnacUrl}`, status: false });
+            return sendError(res, 404, 'No golden image found');
+        }
+        // matchPidWithImageUdi expects { response: [...] }
+        const output = matchPidWithImageUdi(pid, { response: images });
+        logger.info({ msg: 'Fetched golden images from DB', dnacUrl, filtered: output.length, status: true });
         return res.status(200).json({ data: output, status: true });
     } catch (error) {
-        logger.error({ msg: `Error fetching golden image: ${error}`, status: false });
-        return sendError(res, 500, 'Failed to fetch golden image');
+        logger.error({ msg: `Error fetching golden image from DB: ${error}`, status: false });
+        return sendError(res, 500, 'Failed to fetch golden image from DB');
     }
-}
+};
 
 
 
@@ -1678,7 +1706,7 @@ export const syncDevicesWithDnac = async (req, res) => {
         };
 
         const result = await callSyncDevicesApi(payload);
-
+        logger.info({ msg: 'DNAC syncDevicesWithDnac API call', dnac, deviceIds, status: result?.status });
         if (result?.status === true) {
             return res.status(200).json({ msg: "Device sync initiated successfully", status: true, data: result.data });
         } else {
@@ -1712,5 +1740,38 @@ export const updateDeviceMgmtAddress = async (req, res) => {
         logger.error({ msg: `Error in updateDeviceMgmtAddress: ${error.message}`, status: false });
         return sendError(res, 500, 'Internal server error');
     }
+};
+
+
+export const syncDnacSite = async (req, res) => {
+  try {
+    const { dnacUrl } = req.query;
+    if (!dnacUrl) return res.status(400).json({ status: false, msg: 'dnacUrl is required' });
+    const count = await syncDnacSites(dnacUrl);
+    res.json({ status: true, msg: 'Sites synced', count });
+  } catch (err) {
+    res.status(500).json({ status: false, msg: err.message });
+  }
+};
+
+export const syncDnacGoldenImage = async (req, res) => {
+  try {
+    const { dnacUrl } = req.query;
+    if (!dnacUrl) return res.status(400).json({ status: false, msg: 'dnacUrl is required' });
+    const count = await syncDnacGoldenImages(dnacUrl);
+    res.json({ status: true, msg: 'Golden images synced', count });
+  } catch (err) {
+    res.status(500).json({ status: false, msg: err.message });
+  }
+};
+
+
+export const runDnacSyncJobCont = async (req, res) => {
+  try {
+    const result = await runDnacSyncJob();
+    return res.status(200).json({ msg: "DNAC sync job Done", status: true });
+  } catch (err) {
+    return sendError(res, 500, 'Error running DNAC sync job');
+  }
 };
 

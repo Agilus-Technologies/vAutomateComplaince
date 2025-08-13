@@ -26,30 +26,31 @@ let currentMonth = today.toLocaleString("en-US", { month: "long" });
 let currentDate = today.getDate().toString().padStart(2, "0");
 let infoFile = `logFolder/${currentYear}-${currentMonth}-${currentDate}-dnac-info.log`;
 let errorFile = `logFolder/${currentYear}-${currentMonth}-${currentDate}-dnac-error.log`;
-let file = `logFolder/${currentYear}-${currentMonth}-${currentDate}-logFile.txt`;
+// Removed logFile.txt creation as per new requirements.
 
-// Delete log files older than 6 months (never delete today's log file)
+// Delete log files older than 10 days (never delete today's log file)
 {
   const logDir = path.join(__dirname, 'logFolder');
   const now = new Date();
-  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+  const tenDaysAgo = new Date(now);
+  tenDaysAgo.setDate(now.getDate() - 9); // 9 days before today, so keep 10 days including today
   const logFiles = fs.readdirSync(logDir);
 
   logFiles.forEach(fileName => {
-    // Expecting filename format: YYYY-MMMM-DD-logFile.txt (English month)
-    const match = fileName.match(/(\d{4})-([A-Za-z]+)-(\d{2})-logFile\.txt/);
+    // Expecting filename format: YYYY-MMMM-DD-dnac-info.log or YYYY-MMMM-DD-dnac-error.log (English month)
+    const matchInfo = fileName.match(/(\d{4})-([A-Za-z]+)-(\d{2})-dnac-info\.log/);
+    const matchError = fileName.match(/(\d{4})-([A-Za-z]+)-(\d{2})-dnac-error\.log/);
+    let match = matchInfo || matchError;
     if (match) {
       const [_, year, monthStr, day] = match;
-      // Always use English for month parsing
       const month = new Date(`${monthStr} 1, 2000`).getMonth();
       const fileDate = new Date(Number(year), month, Number(day));
       // Never delete today's log file
       const isToday = (Number(year) === currentYear && month === today.getMonth() && Number(day) === today.getDate());
-      if (!isToday && fileDate < sixMonthsAgo) {
+      if (!isToday && fileDate < tenDaysAgo) {
         try {
           fs.unlinkSync(path.join(logDir, fileName));
         } catch (err) {
-          // Use console.error here because logger may not be ready yet
           console.error(`Error removing old log file: ${fileName} - ${err}`);
         }
       }
@@ -57,18 +58,14 @@ let file = `logFolder/${currentYear}-${currentMonth}-${currentDate}-logFile.txt`
   });
 }
 
+
 let options = {
   console: {
     handleExceptions: true,
     level: 'info',
     format: combine(format.colorize(), myFormat)
-  },
-  verbose: {
-    filename: file,
-    level: 'info',
-    format: combine(myFormat)
-  },
-}
+  }
+};
 const logger = createLogger({
   level: 'info',
   format: combine(
@@ -81,7 +78,6 @@ const logger = createLogger({
   ),
   transports: [
     new transports.Console(options.console),
-    new transports.File(options.verbose),
     new transports.File({ filename: infoFile, level: 'info', format: combine(timestamp({ format: "DD-MM-YYYY HH:mm:ss" }), myFormat) }),
     new transports.File({ filename: errorFile, level: 'error', format: combine(timestamp({ format: "DD-MM-YYYY HH:mm:ss" }), myFormat) })
   ],
@@ -92,24 +88,8 @@ const logger = createLogger({
 // `${info.level}: ${info.message} JSON.stringify({ ...rest }) `
 //
 
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new transports.File(options.verbose),
-    new transports.Console(options.console
-      // format: winston.format.simple(),
+// No need to add verbose file transport in development. Only console is added by default above.
 
-      // new transports.Console({
-      //   // format: winston.format.simple(),
-      //   format: combine(
-      //     format.colorize(),
-      //     winston.format.json(),
-      //     //    format.simple(),   
-      //     timestamp({ format: "DD-MM-YYYY HH:mm:ss" }),
-      //     myFormat
-      //   ),
-    ));
-
-}
 addColors({
   debug: 'white',
   error: 'red',

@@ -1,3 +1,5 @@
 node_modules/
 logFolder/
 dist/
+*.zip
+package-lock.json

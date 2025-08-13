@@ -14,6 +14,7 @@ import onboardingModel from '../model/onboardingModel.js';
 import semver from 'semver';
 import { log } from 'console';
 import { sendError } from '../utils/errorHandler.js';
+import dnacSitesModel from '../model/dnacSitesModel.js';
 
 
 
@@ -82,7 +83,7 @@ export const onboardDeviceDetails = async (req, res) => {
         if (dnacUrlss && dnacUrlss?.length == 0) {
             return sendError(res, 404, 'Unable to get DNAC device');
         }
-        logger.info({ msg: "Data get successfully", status: true })
+        logger.info({ msg: "onboardDeviceDetails: DNAC data fetched successfully", count: dnacUrlss.length, status: true })
         return res.json({ data: dnacUrlss, msg: "Data get successfully", status: true })
     } catch (err) {
         logger.error({ msg: 'Error in onboardDeviceDetails', error: err, status: false });
@@ -119,10 +120,9 @@ export const interfaces = async (switchUUID, dnacUrl, token) => {
         };
         return axios.request(config)
             .then((response) => {
+                logger.info({ msg: 'DNAC interfaces API call successful', dnacUrl, switchUUID, status: true });
                 const data = JSON.stringify(response.data);
-                // console.log("sdfg", data);
                 return data;
-                
             })
             .catch((error) => {
                 logger.error({ msg: 'Error in interfaces', error: error, status: false });
@@ -145,12 +145,15 @@ export const dnacDeviceInterfaces = async (req, res) => {
         logDnacResponse('Onboarding.dnacDeviceInterfaces.commonCredentials', commanCredential);
         const { token, cli_command_url, AUTH_API_URL, switchUUID, dnacCredentials } = commanCredential
         let interfaceDetails = await interfaces(switchUUID, dnacUrl, token)
+        if (!interfaceDetails) {
+            logger.error({ msg: 'No interface details from DNAC', dnacUrl, status: false });
+            return sendError(res, 500, 'Failed to fetch interface details from DNAC');
+        }
         logDnacResponse('Onboarding.dnacDeviceInterfaces.interfaces', interfaceDetails);
-        logger.info(switchUUID,dnacUrl, device,"switchUUID,dnacUrl, device in dnacDeviceInterfaces");
-        logger.info(JSON.parse(interfaceDetails), "interfaceDetails in dnacDeviceInterfaces");
-        let data = JSON.parse(interfaceDetails)
-        if (data && data.length == 0) {
-            return sendError(res, 404, 'Unable to get port from device');
+        let data = JSON.parse(JSON.stringify(interfaceDetails));
+        if (!data.response) {
+            logger.error({ msg: 'Invalid response from DNAC', dnacUrl, status: false });
+            return sendError(res, 500, 'Invalid response from DNAC');
         }
         let inter = []
         for (let item of data.response) {
@@ -158,7 +161,8 @@ export const dnacDeviceInterfaces = async (req, res) => {
             inter.push({ portName: item.portName })
             }
         }
-        logger.info("final response in dnacDeviceInterfaces", inter);
+        logger.info({ msg: 'DNAC device interfaces fetched successfully', dnacUrl, count: inter.length, status: true });
+        logger.debug({ msg: 'DNAC device interfaces details', dnacUrl, inter });
         logDnacResponse('Onboarding.dnacDeviceInterfaces.final', inter);
         res.send(inter)
     } catch (err) {
@@ -368,6 +372,7 @@ export const configDevicesInDnac = async (req, res) => {
 
         // Execute templates
         let excute_templte = await execute_templates(datass);
+        logger.info({ msg: 'DNAC configDevicesInDnac: execute_templates called', status: !!excute_templte });
         let msgs = {};
 
         if (excute_templte === "SUCCESS") {
@@ -404,8 +409,8 @@ export const getUnClaimedDevice = async (req, res) => {
         let allDevices = [];
 
         while (true) {
-            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device`;
-            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}&state=Unclaimed`;
+            // const urlPath = `/dna/intent/api/v1/onboarding/pnp-device`;
+            const urlPath = `/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}&state=Unclaimed`;
             const hostName = new URL(dnacUrl).hostname;
             const httpsAgent = new https.Agent({
                 rejectUnauthorized: false
@@ -454,6 +459,7 @@ export const getUnClaimedDevice = async (req, res) => {
             ...device.progress
         }));
 
+        logger.info({ msg: 'DNAC getUnClaimedDevice API call successful', dnacUrl, count: formatted.length, status: true });
         logDnacResponse('Onboarding.getUnClaimedDevice.final', formatted);
         return res.status(200).json({
             status: true,
@@ -506,52 +512,54 @@ export const getDnacSites = async (req, res) => {
             return sendError(res, 400, 'Missing \'dnacUrl\' in request body');
         }
 
-        // Use dummy IP just to pass to commonCredentials
-        const dummyDeviceIp = "";
-        const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
+        // // Use dummy IP just to pass to commonCredentials
+        // const dummyDeviceIp = "";
+        // const creds = await commonCredentials(dummyDeviceIp, dnacUrl);
 
-        if (!creds?.token) {
-            return sendError(res, 400, 'Failed to fetch token from DNAC');
-        }
+        // if (!creds?.token) {
+        //     return sendError(res, 400, 'Failed to fetch token from DNAC');
+        // }
 
-        const sitePath = "/dna/intent/api/v1/site";
-        const hostname = new URL(dnacUrl).hostname;
+        // const sitePath = "/dna/intent/api/v1/site";
+        // const hostname = new URL(dnacUrl).hostname;
 
-        const options = {
-            hostname,
-            path: sitePath,
-            method: "GET",
-            headers: {
-                "X-Auth-Token": creds.token,
-                "Content-Type": "application/json"
-            },
-            rejectUnauthorized: false // Needed for self-signed certs
-        };
+        // const options = {
+        //     hostname,
+        //     path: sitePath,
+        //     method: "GET",
+        //     headers: {
+        //         "X-Auth-Token": creds.token,
+        //         "Content-Type": "application/json"
+        //     },
+        //     rejectUnauthorized: false // Needed for self-signed certs
+        // };
 
-        const result = await new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                const chunks = [];
+        // const result = await new Promise((resolve, reject) => {
+        //     const req = https.request(options, (res) => {
+        //         const chunks = [];
 
-                res.on('data', chunk => chunks.push(chunk));
-                res.on('end', () => {
-                    try {
-                        const responseBody = Buffer.concat(chunks).toString();
-                        const parsed = JSON.parse(responseBody);
-                        resolve(parsed);
-                    } catch (err) {
-                        reject({ msg: "Error parsing response from DNAC", error: err });
-                    }
-                });
-            });
+        //         res.on('data', chunk => chunks.push(chunk));
+        //         res.on('end', () => {
+        //             try {
+        //                 const responseBody = Buffer.concat(chunks).toString();
+        //                 const parsed = JSON.parse(responseBody);
+        //                 resolve(parsed);
+        //             } catch (err) {
+        //                 reject({ msg: "Error parsing response from DNAC", error: err });
+        //             }
+        //         });
+        //     });
 
-            req.on('error', (e) => {
-                reject({ msg: "HTTPS request failed", error: e.message });
-            });
+        //     req.on('error', (e) => {
+        //         reject({ msg: "HTTPS request failed", error: e.message });
+        //     });
 
-            req.end();
-        });
+        //     req.end();
+        // });
+        const result = await dnacSitesModel.find({ dnacUrl }).lean();
 
-        return res.status(200).json({ status: true, data: result });
+
+        return res.status(200).json({ status: true, data: {response: result }});
 
     } catch (err) {
         logger.error({ msg: "Error in getDnacSites", error: err, status: false });
@@ -579,12 +587,11 @@ export const getImageID = async (dnacUrl) => {
         };
         return axios.request(config)
             .then((response) => {
-                // const data = JSON.stringify(response.data;
-                // console.log("sdfg", data);
+                logger.info({ msg: 'DNAC getImageID API call successful', response });
                 return response.data;
             })
             .catch((error) => {
-                logger.error({ msg: 'Error in getImageID', error: error, status: false });
+                logger.error({ msg: 'Error in getImageID', error: error });
                 return null;
             });
 
@@ -613,8 +620,8 @@ export const getTemplate = async (dnacUrl) => {
         };
         return axios.request(config)
             .then((response) => {
+                logger.info({ msg: 'DNAC getTemplate API call successful', dnacUrl, status: true });
                 const data = JSON.stringify(response.data);
-                // console.log("sdfg", data);
                 return data;
             })
             .catch((error) => {
@@ -667,7 +674,8 @@ export const pnpSiteClaim = async (data, dnac) => {
         };
 
         const response = await axios.request(config);
-         return {
+        logger.info({ msg: 'DNAC pnpSiteClaim API call successful', dnac, status: true });
+        return {
             statusCode: response.status,
             message: "Success",
             data: response.data
@@ -702,7 +710,7 @@ export const saveClaimSiteData = async (req, res) => {
             
 
         let getTemplateID = await getTemplate(payload.dnacUrl)
-        console.log("getTemplateID", JSON.stringify(getTemplateID,null,2))
+        logger.info({ msg: 'DNAC getTemplate called in saveClaimSiteData', dnacUrl: payload.dnacUrl, status: true });
         logger.error('template data from DNAC',JSON.stringify(getTemplateID,null,2));
         let filterTemplate;
         if (getTemplateID) {
@@ -797,20 +805,34 @@ export const saveClaimSiteData = async (req, res) => {
             //     email: userInfo?.sub || ''
             // }
         };
+        // Check existing data
+        //  const existingData = await db_connect.collection("siteclaimdata").find({
+        //     mgmtL3IP: payload.mgmtL3IP,
+        //     dnacUrl: payload.dnacUrl,
+        // }).toArray();
+        // // If found, mark them deleted
+        // if (existingData.length > 0) {
+        //     await db_connect.collection("siteclaimdata").updateMany(
+        //         {
+        //     mgmtL3IP: payload.mgmtL3IP,
+        //     dnacUrl: payload.dnacUrl,
+        //         },
+        //         {
+        //             $set: { isDeleted: true, updatedAt: new Date() }
+        //         }
+        //     );
+        // }
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
         console.log("saveData", saveData)
         //site-claim api
-        // let pnpResponse = await pnpSiteClaim(data, payload.dnacUrl)
-                let pnpResponse = {
-                    statusCode: 200,
-                    message: "Device claimed successfully",
-                    data: {
-                        deviceId: payload.devideID,
-                        siteId: payload.site,
-                        type: "Default",
-                        configInfo: data.configInfo
-                    }
-                }
+        let pnpResponse = await pnpSiteClaim(data, payload.dnacUrl)
+        logger.info({ msg: 'DNAC pnpSiteClaim called in saveClaimSiteData', dnacUrl: payload.dnacUrl, status: true });                //     data: {
+                //         deviceId: payload.devideID,
+                //         siteId: payload.site,
+                //         type: "Default",
+                //         configInfo: data.configInfo
+                //     }
+                // }
         const { statusCode, message, data: responseData } = pnpResponse;
         // If DNAC returns success, update claimStatus = true
         if (statusCode >= 200 && statusCode < 300) {

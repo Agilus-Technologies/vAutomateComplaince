@@ -877,6 +877,63 @@ export const updateMgmtAddressHelper = async (dnac, newIP, existMgmtIp) => {
 };
 
 
+export const getDnacSites = async (dnacUrl) => {
+    try {
+      if (!dnacUrl) {
+        throw new Error("Missing 'dnacUrl'");
+      }
+  
+      const creds = await commonCredentials("", dnacUrl);
+  
+      if (!creds?.token) {
+        throw new Error("Failed to fetch token from DNAC");
+      }
+  
+      const sitePath = "/dna/intent/api/v1/site";
+      const hostname = new URL(dnacUrl).hostname;
+  
+      const options = {
+        hostname,
+        path: sitePath,
+        method: "GET",
+        headers: {
+          "X-Auth-Token": creds.token,
+          "Content-Type": "application/json"
+        },
+        rejectUnauthorized: false
+      };
+  
+      const result = await new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          const chunks = [];
+  
+          res.on("data", chunk => chunks.push(chunk));
+          res.on("end", () => {
+            try {
+              const responseBody = Buffer.concat(chunks).toString();
+              const parsed = JSON.parse(responseBody);
+              resolve(parsed);
+            } catch (err) {
+              reject({ msg: "Error parsing response from DNAC", error: err });
+            }
+          });
+        });
+  
+        req.on("error", (e) => {
+          reject({ msg: "HTTPS request failed", error: e.message });
+        });
+  
+        req.end();
+      });
+  
+      return result;
+    } catch (err) {
+      logger.error({ msg: "Error in getDnacSites", error: err, status: false });
+      return null;
+    }
+  };
+
+
 
 
 
