@@ -21,17 +21,16 @@ export async function syncDnacSites(dnacUrl) {
   let savedSiteCount = 0;
   for (const site of sites) {
     await dnacSitesModel.findOneAndUpdate(
-      { dnacUrl, siteId: site.id },
+      { dnacUrl, id: site.id },
       {
         dnacUrl,
-        siteId: site.id,
+        id: site.id,
         name: site.name,
         parentId: site.parentId,
         instanceTenantId: site.instanceTenantId,
         siteHierarchy: site.siteHierarchy,
         siteNameHierarchy: site.siteNameHierarchy,
         additionalInfo: site.additionalInfo,
-        siteData: site,
         syncedAt: new Date()
       },
       { upsert: true }

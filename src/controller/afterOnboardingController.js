@@ -18,6 +18,8 @@ import { sendError } from '../utils/errorHandler.js';
 import { log } from 'console';
 import { logDnacResponse } from '../helper/logDnacResponse.js';
 
+import dnacGoldenImageModel from '../model/dnacGoldenImageModel.js';
+import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../scheduler/dnacSyncScheduler.js';
 
 
 // const base64 = require('base-64');
@@ -49,7 +51,7 @@ export const deviceDetails = async (req, res) => {
         logger.info({ msg: 'DNAC deviceDetails: Fetching claimed devices', status: true });
         let claimedDevices = await db_connect
             .collection("siteclaimdata")
-            .find({claimStatus:true })
+            .find({claimStatus:true,isDeleted:false,dayNBoarding:false}) // Fetch only claimed devices that are not deleted
             .toArray();
 
         claimedDevices.forEach(device => {
@@ -130,23 +132,54 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
 export const pingDevice = async (req, res) => {
     try {
         
-        let { device, dnacUrl,ip } = req.body;
+        let { device, dnacUrl,ip,hostname } = req.body;
+        let payloadDevice = device;
         device = device?.split(" ")[0]; // Extract IP from device string
         if (!ip || !device || !dnacUrl) {
             logger.error({ msg: "Unable to get ip,device or dnac url ", status: false })
             console.log({ msg: "Unable to get ip,device or dnac url ", status: false })
             return res.send({ msg: "Unable to get ip,device or dnac url ", status: false })
         }
+
+        const db_connect = dbo && dbo.getDb();
+        const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            {dnacUrl: dnacUrl, device: device, hostname: hostname})
+
+        if (existingData?.newMgmtIp) {
+            // If data already exists, return it
+            device = existingData?.newMgmtIp;
+        }
         let finalOutput = await dnacResponse(dnacUrl, device, ip)
-        logger.info({ msg: 'DNAC pingDevice API call successful', dnacUrl, device, status: finalOutput.status });
+
+        logger.info({ msg: 'DNAC pingDevice API Response', dnacUrl, device, ip, finalOutput });
         if (!finalOutput.status) {
             // if (Object.keys(finalOutput).length == 0 || !finalOutput.status) {
             logger.error(finalOutput)
-            console.log(finalOutput)
             return res.send(finalOutput)
         }
         let pingStatus = finalOutput?.data?.includes("Success rate is 100 percent (5/5)")
         if (pingStatus) {
+            await db_connect.collection('dayN_onboarding').findOneAndUpdate(
+                {
+                    dnacUrl: dnacUrl,
+                    device: payloadDevice,
+                    hostname: hostname ,
+                },
+                {
+                    $set: {
+                        pingOutput: finalOutput.data,
+                        pingStatus: finalOutput.status,
+                        ping_ip: ip,
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    }
+                },
+                {
+                    upsert: true,
+                    returnDocument: 'after'
+                }
+            );
+
             let resultMsg = { msg: "Gateway reachable from the current management IP", status: true }
             console.log(resultMsg)
             logDnacResponse("onboarding.pingDeviceIfPart",resultMsg)
@@ -161,7 +194,8 @@ export const pingDevice = async (req, res) => {
     } catch (err) {
         let resultMsg = { msg: `Failed to pingDevice:${err}`, status: false }
         logger.error(resultMsg)
-        return res.send({ msg: `Failed to pingDevice`, status: false })
+        // return res.send({ msg: `Failed to pingDevice`, status: false })
+        return sendError(res, 500, 'Failed to ping Device');
     }
 
 };
@@ -786,7 +820,16 @@ ${ipInterfaceBlock}
  */
 export const configureDevice = async (req, res) => {
     try {
-        const { config, dnac, device } = req.body.commandData;
+        let { config, dnac, device } = req.body.commandData;
+        let payloadDevice = device;
+        const { host_name, mgmtL3Ip, ip, serialNumber, vtpDomainName, vtpVersion } = req.body;
+        const db_connect = dbo && dbo.getDb();
+        const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            { dnacUrl: dnac, device: device, hostname: host_name })
+
+        if (existingData?.newMgmtIp) {
+            device = existingData?.newMgmtIp;
+        }
 
         if (!config || !dnac || !device) {
             return res.status(400).json({
@@ -797,13 +840,73 @@ export const configureDevice = async (req, res) => {
 
         const dnacData = { config, dnac: dnac, device };
         const executeResult = await execute_templates(dnacData);
-        // const executeResult = "SUCCESS";
 
         if (executeResult === "SUCCESS") {
+            await db_connect.collection('dayN_onboarding').findOneAndUpdate(
+                {
+                    dnacUrl: dnac,
+                    device: payloadDevice,
+                    hostname: host_name,
+                },
+                {
+                    $set: {
+                        dayNStatus: true,
+                        dayNresult: executeResult,
+                        newMgmtIp: mgmtL3Ip || ip,
+                        serialNumber: serialNumber,
+                        vtpDomainName: vtpDomainName,
+                        vtpVersion: vtpVersion,
+                        updatedAt: new Date()
+                    }
+                },
+                {
+                    upsert: true,
+                    returnDocument: 'after'
+                }
+            );
+            await db_connect.collection('siteclaimdata').findOneAndUpdate(
+                {
+                    dnacUrl: dnac,
+                    ip: payloadDevice,
+                    hostname: host_name,
+                },
+                {
+                    $set: {
+                        dayNBoarding: true
+                    }
+                },
+                {
+                    upsert: true,
+                    returnDocument: 'after'
+                }
+            );
+
             const validateResponse = await validateDataFromDnac(dnac, device);
-            logger?.info(validateResponse); // Optional logging
+            logger?.info(validateResponse);
             return res.json(validateResponse);
         } else {
+             await db_connect.collection('dayN_onboarding').findOneAndUpdate(
+                {
+                    dnacUrl: dnac,
+                    device: device,
+                    hostname: host_name,
+                },
+                {
+                    $set: {
+                        dayNStatus: false,
+                        dayNresult: executeResult,
+                        newMgmtIp: mgmtL3Ip || ip,
+                        serialNumber: serialNumber,
+                        vtpDomainName: vtpDomainName,
+                        vtpVersion: vtpVersion,
+                        updatedAt: new Date()
+                    }
+                },
+                {
+                    upsert: true,
+                    returnDocument: 'after'
+                }
+            );
             return res.json({
                 status: false,
                 msg: "Unable to configure device."
@@ -1175,22 +1278,32 @@ export const getRadiusConfiguration = async (req, res) => {
 
 export const deployDefaultGateway = async (req, res) => {
   try {
-    const { dnac, device, gateway_ip } = req.body;
-
+    let { dnac, device, gateway_ip,hostname } = req.body;
+    let payloadDevice = device;
     if (!dnac || !device || !gateway_ip) {
       return res.status(400).json({ msg: "Missing required fields", status: false });
     }
+    const db_connect = dbo && dbo.getDb();
+    const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            {dnacUrl: dnac, device: device, hostname: hostname})
 
+        if (existingData?.newMgmtIp) {
+            // If data already exists, return it
+            device = existingData?.newMgmtIp;
+        }
     const item = {
       dnac,
       device,
       config: 
         `ip default-gateway ${gateway_ip}`
     };
-//    const result ={ status: true, msg:"Default gateway IP configured successfully" }
     const result = await execute_templates(item);
     logger.info({ msg: 'DNAC deployDefaultGateway: execute_templates called', dnac, device, status: !!result });
     if (typeof result === 'string' || result.status === true) {
+      await db_connect.collection("dayN_onboarding").updateOne(
+      { dnacUrl: dnac, device: payloadDevice, hostname:hostname},
+      { $set: { gateway_ip: gateway_ip,configure_gateway_ip: true } }
+    );
       return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
     } else {
       return res.status(500).json({ msg: "Failed to configure default gateway", result,status: false });
@@ -1239,7 +1352,7 @@ export const getPnpClaimedDevices = async (req, res) => {
 
         let claimedDevices = await db_connect
             .collection("siteclaimdata")
-            .find({ })
+            .find({isDeleted:false })
             .toArray();
 
         if (claimedDevices.length === 0) {
@@ -1267,7 +1380,6 @@ export const getPnpClaimedDevices = async (req, res) => {
 export const getDeviceStatus = async (req, res) => {
 
     try {
-
         const { serialNumber, dnacUrl,id } = req.query;
         const credentialsData = await commonCredentials('', dnacUrl);
 
@@ -1288,20 +1400,22 @@ export const getDeviceStatus = async (req, res) => {
         const device = response.data[0];
 
         if (!device) {
-            return res.status(404).json({
+            return res.status(200).json({
                 message: "Device not found for provided serial number",
                 serialNumber,
+                status: false
             });
         }
         const db_connect = dbo && dbo.getDb();
-        let update = await db_connect.collection("siteclaimdata").updateOne(
+        let update = await db_connect.collection("siteclaimdata").findOneAndUpdate(
             { _id: new ObjectId(id) },
             {
                 $set: {
                     state: device.deviceInfo.state,
                     claimError: device.deviceInfo.errorDetails?.details || null,
                 },
-            }
+            },
+            { upsert: true , returnDocument: 'after' }
         );
 
 
@@ -1311,7 +1425,7 @@ export const getDeviceStatus = async (req, res) => {
             state: device.deviceInfo.state,
             workflowState: device.workflow?.state,
             errorMessage: device.deviceInfo.errorDetails?.details || null,
-            dayZeroErrorMessage: device.dayZeroConfigPreview?.errorMessage || null
+            dayZeroErrorMessage: update.claimStatus === true ? "Success" : "Failed",
         });
 
     } catch (error) {
@@ -1351,6 +1465,14 @@ export const getDeviceBySerial = async (req, res) => {
         });
         logger.info({ msg: 'DNAC getDeviceBySerial API call successful', dnacUrl, serialNumber, status: true });
         const device = response.data.response[0] || [];
+        if (device && device.length === 0) {
+            logger.error({ msg: 'Device not found for provided serial number', serialNumber, status: false });
+            return res.status(200).json({
+                msg: "Device not found for provided serial number",
+                serialNumber,
+                status: false
+            });
+        }
         logger.info(device, "Device details fetched from DNAC");
         // const dbObject = {
         //     host_name: device.hostname,
@@ -1413,7 +1535,7 @@ export const getDeviceBySerial = async (req, res) => {
             logger.info("********** Matched Compliance Templates ******************** :", matchingTemplates);
             logger.info("********** Matched Compliance Templates Output ******************** :", output);
             return res.status(200).json({
-                message: "Device found and compliance templates matched",
+                msg: "Device found and compliance templates matched",
                 device: output,
                 status: true
             });
@@ -1425,7 +1547,7 @@ export const getDeviceBySerial = async (req, res) => {
         console.error("Error fetching PnP device by serial number:", error.message);
         logger.error({ msg: "Error fetching PnP device by serial number", error: error.message, status: false });
         return res.status(500).json({
-            message: "Failed to retrieve device by serial number",
+            msg: "Failed to retrieve device by serial number",
             error: error.message,
         });
     }
@@ -1434,9 +1556,9 @@ export const getDeviceBySerial = async (req, res) => {
 export const getAllDevices = async (req, res) => {
   try {
     const db_connect = dbo && dbo.getDb();
-    const devices = await db_connect.collection("siteclaimdata").find({}).toArray();
+    const devices = await db_connect.collection("pe_devices_config").find({}).toArray();
     logger.info({ msg: 'DNAC getAllDevices: siteclaimdata fetched', count: devices.length, status: true });
-    res.status(200).json(devices);
+    res.status(200).json({devices});
   } catch (error) {
     logger.error({ msg: 'Failed to fetch devices', error, status: false });
     return sendError(res, 500, 'Failed to fetch devices');
@@ -1583,7 +1705,7 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
     // If matched in either place, push to results
     if (matched) {
       matches.push({
-        imageUuid: image.imageUuid,
+        imageUuid: image.imageId,
         family: image.family,
         displayVersion: image.displayVersion,
         imageName: image.imageName,
@@ -1597,8 +1719,6 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
 
 
 
-import dnacGoldenImageModel from '../model/dnacGoldenImageModel.js';
-import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../scheduler/dnacSyncScheduler.js';
 
 export const getGoldenImage = async (req, res) => {
     try {
@@ -1626,10 +1746,18 @@ export const getGoldenImage = async (req, res) => {
 
 export const configureVtpmode = async (req, res) => {
     try {
-        const { dnac, device, vtpmode } = req.body;
+        let { dnac, device, vtpmode, hostname } = req.body;
         
         if (!dnac || !device || !vtpmode) {
             return res.status(400).json({ msg: "Missing required fields", status: false });
+        }
+        const db_connect = dbo && dbo.getDb();
+
+        const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            { dnacUrl: dnac, device: device, hostname: hostname })
+
+        if (existingData?.newMgmtIp) {
+            device = existingData?.newMgmtIp;
         }
 
         const item = {
@@ -1722,15 +1850,34 @@ export const syncDevicesWithDnac = async (req, res) => {
 
 export const updateDeviceMgmtAddress = async (req, res) => {
     try {
-        const { dnac, newIP,existMgmtIp } = req.body;
+        let { dnac, newIP,existMgmtIp,hostname } = req.body;
+        const db_connect = dbo && dbo.getDb();
 
         if (!dnac || !newIP) {
             return res.status(400).json({ msg: "Missing required fields", status: false });
         }
 
+        const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            { dnacUrl: dnac, device: existMgmtIp, hostname: hostname })
+
+        if (existingData?.newMgmtIp) {
+            // If data already exists, return it
+            existMgmtIp = existingData?.newMgmtIp;
+        }
+        
+
         const result = await updateMgmtAddressHelper(dnac, newIP,existMgmtIp);
 
         if (result.status === true) {
+            await db_connect.collection("dayN_onboarding").updateOne(
+                { dnacUrl: dnac, device: existMgmtIp, hostname: hostname },
+                { $set: { previousMgmtIp: existMgmtIp,newMgmtIp : newIP, mgmtIPconfigured:true } }
+            );
+            await db_connect.collection("siteclaimdata").updateOne(
+                { dnacUrl: dnac, ip: existMgmtIp, hostname: hostname },
+                { $set: { newMgmtIp : newIP,updatedAt: new Date() } }
+            );
+            logger.info({ msg: 'Management IP updated successfully', dnac, newIP, status: true });
             return res.status(200).json({ msg: "Management IP updated successfully", taskId: result.taskId, status: true });
         } else {
             return res.status(500).json({ msg: result.msg || "Failed to update Management IP", status: false });
@@ -1738,7 +1885,7 @@ export const updateDeviceMgmtAddress = async (req, res) => {
 
     } catch (error) {
         logger.error({ msg: `Error in updateDeviceMgmtAddress: ${error.message}`, status: false });
-        return sendError(res, 500, 'Internal server error');
+        return sendError(res, 500, 'Failed to process update Management IP');
     }
 };
 
@@ -1774,4 +1921,99 @@ export const runDnacSyncJobCont = async (req, res) => {
     return sendError(res, 500, 'Error running DNAC sync job');
   }
 };
+
+
+export const checkIPGatewayStatus = async (req, res) => {
+    try {
+        const { dnacUrl, device,hostname } = req.body;
+        if (!dnacUrl || !device || !hostname) {
+            return sendError(res, 400, 'Missing required fields: dnac, device, or hostname');
+        }
+        const db_connect = dbo && dbo.getDb();
+        const result =await db_connect.collection("dayN_onboarding").findOne(
+            {dnacUrl, device,hostname },
+           
+        );
+        
+        if(!result?.gateway_ip) {   
+            return res.status(200).json({ status: false, msg: "None IP gateway configured" });
+        }
+        return res.status(200).json({ status: result.configure_gateway_ip || false, msg: `Earlier Configured gateway Ip ${result.gateway_ip}` });
+    } catch (error) {
+        logger.error({ msg: `Error fetching check IPGateway Status: ${error.message}`, status: false });
+        return sendError(res, 500, 'Error fetching check IPGateway status');
+    }
+}
+
+export const checkMgmtConfigIP = async (req, res) => {
+    try {
+        const { dnacUrl, device,hostname } = req.body;
+        if (!dnacUrl || !device || !hostname) {
+            return sendError(res, 400, 'Missing required fields: dnac, device, or hostname');
+        }
+        const db_connect = dbo && dbo.getDb();
+        const result =await db_connect.collection("dayN_onboarding").findOne(
+            {dnacUrl, device, hostname }
+        );
+        if(!result) {   
+            return res.status(200).json({ status: false, msg: "No data found" });
+        }
+        return res.status(200).json({ status: result.configure_gateway_ip || false, msg: `Earlier Configured gateway Ip ${result.gateway_ip}` });
+    } catch (error) {
+        logger.error({ msg: `Error fetching check IPGateway Status: ${error.message}`, status: false });
+        return sendError(res, 500, 'Error fetching check IPGateway status');
+    }
+}
+
+export const getDayNStatus = async (req, res) => {  
+    try {   
+        const { dnacUrl, device, hostname, serialNumber } = req.body;
+        if (!dnacUrl || !device || !hostname) {
+            return sendError(res, 400, 'Missing required fields: dnac, device, or hostname');
+        }
+        const db_connect = dbo && dbo.getDb();
+        const credentialsData = await commonCredentials('', dnacUrl);
+
+        if (!credentialsData?.token) {
+            return res.status(400).json({ msg: "Failed to fetch token from DNAC", status: false });
+        }
+        const response = await axios.get(
+            `${dnacUrl}/dna/intent/api/v1/onboarding/pnp-device?serialNumber=${serialNumber}`,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Auth-Token": credentialsData?.token,
+                },
+                httpsAgent: new https.Agent({ rejectUnauthorized: false }) // If self-signed
+            }
+        );
+        logger.info({ msg: 'DNAC getDeviceStatus API call successful', dnacUrl, serialNumber, status: true });
+        const responseData = response.data[0];
+
+        if (!responseData) {
+            return res.status(404).json({
+                message: "Device not found for provided serial number",
+                serialNumber,
+            });
+        }
+        const result = await db_connect.collection("dayN_onboarding").findOne(
+            { dnacUrl, device, hostname }
+        );
+        if (!result) {
+            return res.status(200).json({ status: false, msg: "No data found" });
+        }
+        // return res.status(200).json({ status: result.dayNStatus || false, msg: result.dayNresult || "DayN status not set" });
+        return res.status(200).json({
+            serialNumber: responseData.deviceInfo.serialNumber,
+            deviceName: responseData.deviceInfo.hostname,
+            state: responseData.deviceInfo.state,
+            workflowState: responseData.workflow?.state,
+            errorMessage: responseData.deviceInfo.errorDetails?.details || null,
+            dayZeroErrorMessage: result.dayNresult || null
+        })
+    } catch (error) {
+        logger.error({ msg: `Error fetching DayN status: ${error.message}`, status: false });
+        return sendError(res, 500, 'Error fetching DayN status');
+    }
+}
 

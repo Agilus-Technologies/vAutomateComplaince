@@ -167,8 +167,8 @@ export const commonCredentials = async (ip = "", dnacUrl = "") => {
         let setUpDetails = await db_connect.collection('tbl_Package').find({}).project({ "dnac": 1, "_id": 0 }).toArray();
         let switchUUID = "";
         if (ip !== "") {
-            let deviceUUId = await db_connect.collection('ms_device').find({ $and: [{ source: "DNAC" }, { managementIpAddress: ip }, { "source_url": dnacUrl }] }).toArray();
-            switchUUID = deviceUUId && deviceUUId[0]?.device_id
+            // let deviceUUId = await db_connect.collection('ms_device').find({ $and: [{ source: "DNAC" }, { managementIpAddress: ip }, { "source_url": dnacUrl }] }).toArray();
+            // switchUUID = deviceUUId && deviceUUId[0]?.device_id
         }
         let AUTH_API_URL = "/dna/system/api/v1/auth/token"
         // let template_id = "48967f32-a1de-46a0-a407-84164b8"

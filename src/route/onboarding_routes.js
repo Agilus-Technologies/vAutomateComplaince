@@ -2,7 +2,7 @@ import express from "express";
 import { onboardDeviceDetails,configDevicesInDnac,dnacDeviceInterfaces, getUnClaimedDevice, getDnacSites, saveClaimSiteData, postPnPDeviceSiteClaim, allDnacDetails, sendMailForScreenShot, getPnpDevices, getFloorValue, getTemplatesByFloor, getDeviceDetails, getAllLocations, getDevicesByLocation, getDeviceInfo} from "../controller/Onboarding.js";
 // import { authenticate, authorizeRoles} from '../../auth.js';
 // import { dnacDataDetail, insertDeviceInDnac, onboardDeviceDetails } from "../controller/Onboarding_Portal/Onboarding.js";
-import { configurationDetails, configureDevice, configureDeviceInISE, configureVtpmode, deleteDayNConfigById, deleteDeviceById, deployDefaultGateway, deviceDetails, getAllDayNConfigs, getAllDevices, getCommandOutput, getDeviceBySerial, getDeviceStatus, getGoldenImage, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, runDnacSyncJobCont, syncDevicesWithDnac, syncDnacGoldenImage, syncDnacSite, tacacsAndRadiusConf, updateDayNConfigById, updateDeviceById, updateDeviceMgmtAddress, updateMgmtIpAddress} from "../controller/afterOnboardingController.js";
+import { checkIPGatewayStatus, configurationDetails, configureDevice, configureDeviceInISE, configureVtpmode, deleteDayNConfigById, deleteDeviceById, deployDefaultGateway, deviceDetails, getAllDayNConfigs, getAllDevices, getCommandOutput, getDayNStatus, getDeviceBySerial, getDeviceStatus, getGoldenImage, getPnpClaimedDevices, getRadiusConfiguration, getSiteClaimAndPnpTemplateBySourceUrl, networkDevice, pingDevice, pnpDatafromDB, runDnacSyncJobCont, syncDevicesWithDnac, syncDnacGoldenImage, syncDnacSite, tacacsAndRadiusConf, updateDayNConfigById, updateDeviceById, updateDeviceMgmtAddress, updateMgmtIpAddress} from "../controller/afterOnboardingController.js";
 import { run_show_command_on_device } from "../helper/dnacHelper.js";
 import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from "../scheduler/dnacSyncScheduler.js";
 
@@ -83,6 +83,12 @@ router.get('/syncDnacSites', syncDnacSite);
 router.get('/syncDnacGoldenImages', syncDnacGoldenImage);
 
 router.get('/runDnacSyncJob', runDnacSyncJobCont);
+
+router.post('/checkIPGatewayStatus',checkIPGatewayStatus)
+
+
+router.post('/getDayNStatus',getDayNStatus)
+
 
 
 

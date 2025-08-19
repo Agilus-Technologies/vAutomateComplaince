@@ -137,10 +137,17 @@ export const interfaces = async (switchUUID, dnacUrl, token) => {
 
 export const dnacDeviceInterfaces = async (req, res) => {
     try {
-        // const { dnacUrl, device } = req.body;
-        let { dnacUrl, device } = req.body;
+        let { dnacUrl, device, hostname } = req.body;
          device = device?.split(" ")[0]; // "10.28.33.7" from "10.28.33.7 (HTAINHYD06XXXCS001)"
 
+        const db_connect = dbo && dbo.getDb();
+        const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            { dnacUrl: dnacUrl, device: device, hostname: hostname })
+
+        if (existingData?.newMgmtIp) {
+            // If data already exists, return it
+            device = existingData?.newMgmtIp;
+        }
         let commanCredential = await commonCredentials(device, dnacUrl)
         logDnacResponse('Onboarding.dnacDeviceInterfaces.commonCredentials', commanCredential);
         const { token, cli_command_url, AUTH_API_URL, switchUUID, dnacCredentials } = commanCredential
@@ -150,7 +157,7 @@ export const dnacDeviceInterfaces = async (req, res) => {
             return sendError(res, 500, 'Failed to fetch interface details from DNAC');
         }
         logDnacResponse('Onboarding.dnacDeviceInterfaces.interfaces', interfaceDetails);
-        let data = JSON.parse(JSON.stringify(interfaceDetails));
+        let data = JSON.parse(interfaceDetails);
         if (!data.response) {
             logger.error({ msg: 'Invalid response from DNAC', dnacUrl, status: false });
             return sendError(res, 500, 'Invalid response from DNAC');
@@ -391,13 +398,13 @@ export const configDevicesInDnac = async (req, res) => {
 export const getUnClaimedDevice = async (req, res) => {
     try {
         const { dnacUrl,serialNumber } = req.body;
+        logger.info('getUnClaimedDevice called', dnacUrl, serialNumber );
 
         if (!dnacUrl && !serialNumber) {
             return sendError(res, 400, 'Missing required fields: dnacUrl');
         }
 
-        // Hardcoded IP for testing (replace with actual source)
-        const dummyDeviceIp = "";
+         const dummyDeviceIp = "";
         const credentialsData = await commonCredentials(dummyDeviceIp, dnacUrl);
         logDnacResponse('Onboarding.getUnClaimedDevice.commonCredentials', credentialsData);
         if (!credentialsData?.token) {
@@ -674,7 +681,7 @@ export const pnpSiteClaim = async (data, dnac) => {
         };
 
         const response = await axios.request(config);
-        logger.info({ msg: 'DNAC pnpSiteClaim API call successful', dnac, status: true });
+        logger.info({ msg: 'DNAC pnpSiteClaim API call successful', response, status: true });
         return {
             statusCode: response.status,
             message: "Success",
@@ -696,7 +703,6 @@ export const pnpSiteClaim = async (data, dnac) => {
 
 export const saveClaimSiteData = async (req, res) => {
     try {
-
 
         const payload = req.body;
         for (let key in payload) {
@@ -799,6 +805,7 @@ export const saveClaimSiteData = async (req, res) => {
             createdAt: timestamp,
             updatedAt: timestamp,
             dayNBoarding:false,
+            isDeleted: false
             // userInfo: {
             //     username: userInfo?.username || '',
             //     role: userInfo?.role || '',
@@ -806,33 +813,41 @@ export const saveClaimSiteData = async (req, res) => {
             // }
         };
         // Check existing data
-        //  const existingData = await db_connect.collection("siteclaimdata").find({
-        //     mgmtL3IP: payload.mgmtL3IP,
-        //     dnacUrl: payload.dnacUrl,
-        // }).toArray();
-        // // If found, mark them deleted
-        // if (existingData.length > 0) {
-        //     await db_connect.collection("siteclaimdata").updateMany(
-        //         {
-        //     mgmtL3IP: payload.mgmtL3IP,
-        //     dnacUrl: payload.dnacUrl,
-        //         },
-        //         {
-        //             $set: { isDeleted: true, updatedAt: new Date() }
-        //         }
-        //     );
-        // }
+         const existingData = await db_connect.collection("siteclaimdata").find({
+            mgmtL3IP: payload.mgmtL3IP,
+            hostname: payload.hostname,
+            dnacUrl: payload.dnacUrl,
+            isDeleted: { $ne: true }
+        }).toArray();
+        // If found, mark them deleted
+        if (existingData.length > 0) {
+            await db_connect.collection("siteclaimdata").updateMany(
+                {
+            mgmtL3IP: payload.mgmtL3IP,
+            dnacUrl: payload.dnacUrl,
+            hostname: payload.hostname
+                },
+                {
+                    $set: { isDeleted: true, updatedAt: new Date() }
+                }
+            );
+        }
         let saveData = await db_connect.collection("siteclaimdata").insertOne(documentToInsert);
-        console.log("saveData", saveData)
+        // console.log("saveData", saveData)
         //site-claim api
         let pnpResponse = await pnpSiteClaim(data, payload.dnacUrl)
+            // let pnpResponse ={   
+            //     statusCode: 200,
+            //      deviceId: payload.devideID,
+            //     siteId: payload.site,
+            //     type: "Default",
+            //     configInfo: data.configInfo,
+
+        if (result.status === true) {
+         
+            //     responseData: saveData
+            // }
         logger.info({ msg: 'DNAC pnpSiteClaim called in saveClaimSiteData', dnacUrl: payload.dnacUrl, status: true });                //     data: {
-                //         deviceId: payload.devideID,
-                //         siteId: payload.site,
-                //         type: "Default",
-                //         configInfo: data.configInfo
-                //     }
-                // }
         const { statusCode, message, data: responseData } = pnpResponse;
         // If DNAC returns success, update claimStatus = true
         if (statusCode >= 200 && statusCode < 300) {
@@ -841,6 +856,7 @@ export const saveClaimSiteData = async (req, res) => {
                 {
                     $set: {
                         claimStatus: true,
+                        claimedResult: pnpResponse,
                         updatedAt: new Date()
                     }
                 }
@@ -853,10 +869,11 @@ export const saveClaimSiteData = async (req, res) => {
             });
         }
         return res.status(statusCode || 500).json({
-            msg: `Site claim failed from DNAC: ${message || "Unknown error"}`,
+            msg: `Site claim failed from DNAC: ${message || "Claim failed"}`,
             status: false,
             error: pnpResponse?.details || {}
         });
+    }
 
     } catch (err) {
         logger.error({ msg: 'Error in saveClaimSiteData', error: err, status: false });
