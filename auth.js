@@ -1,3 +1,6 @@
+import { log } from "handlebars";
+import { logDnacError } from "./src/helper/logDnacResponse";
+
 export const authenticate = async (req, res, next) => {
     try{
         console.log("req.headers",req.headers)
@@ -32,7 +35,7 @@ export const authenticate = async (req, res, next) => {
         next();
 
     }catch(error){
-        logger.error(error);
+        logDnacError('auth.authenticate', error);
         return res.status(403).json({ 
             status: false, 
             message: 'Forbidden: Invalid token', 
@@ -54,7 +57,7 @@ export const authorizeRoles = (roles) => (req, res, next) => {
         }
         next();
     }catch(error){
-        logger.error(error);
+        logDnacError('auth.authorizeRoles', error);
         return res.status(500).json({ 
             status: false, 
             message: error.message, 

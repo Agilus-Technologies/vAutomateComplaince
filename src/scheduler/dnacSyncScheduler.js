@@ -7,6 +7,7 @@ import logger from '../../logger.js';
 import { getImageID } from '../controller/Onboarding.js';
 import dbo from "../db/conn.js";
 import { set } from 'mongoose';
+import { logDnacError, logDnacResponse } from '../helper/logDnacResponse.js';
 
 
 /**
@@ -16,7 +17,7 @@ export async function syncDnacSites(dnacUrl) {
   const db_connect = dbo && dbo.getDb();
 
   const sitesResp = await getDnacSites(dnacUrl);
-  logger.info({ msg: 'DNAC syncDnacSites: getDnacSites API call successful', dnacUrl, status: !!sitesResp });
+  logDnacResponse('syncDnacSites', { dnacUrl, response: sitesResp });
   const sites = sitesResp?.response || [];
   let savedSiteCount = 0;
   for (const site of sites) {
@@ -93,7 +94,7 @@ export async function runDnacSyncJob() {
           await syncDnacSites(dnacUrl);
           await syncDnacGoldenImages(dnacUrl);
         } catch (err) {
-          logger.error(`Failed to sync for DNAC ${dnac.DnacURL}:`, err);
+          logDnacError('runDnacSyncJob.syncError', { dnacUrl: dnac.DnacURL, error: err });
         }
       }
     }

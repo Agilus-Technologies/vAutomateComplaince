@@ -16,7 +16,7 @@ import { ObjectId } from 'mongodb';
 import { dnacDeviceInterfaces, getImageID, getStormControlValue, interfaces } from './Onboarding.js';
 import { sendError } from '../utils/errorHandler.js';
 import { log } from 'console';
-import { logDnacResponse } from '../helper/logDnacResponse.js';
+import { logDnacError, logDnacResponse } from '../helper/logDnacResponse.js';
 
 import dnacGoldenImageModel from '../model/dnacGoldenImageModel.js';
 import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../scheduler/dnacSyncScheduler.js';
@@ -31,7 +31,6 @@ import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../schedule
 //         const db_connect = dbo && dbo.getDb();
 //         let setUpDetails = await db_connect.collection('ms_device').find({ "source": "DNAC" }).toArray();
 //         if (!setUpDetails || setUpDetails?.length == 0) {
-//             logger.error({ data: [], msg: "Unable to get dnac data.", status: false })
 //             return sendError(res, 404, 'No DNAC data found');
 //         }
 //         res.json({
@@ -40,7 +39,6 @@ import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../schedule
 //             status: true
 //         })
 //     } catch (err) {
-//         logger.error({ data: [], msg: `Error msg in deviceDetails:${err}`, status: false })
 //         return sendError(res, 500, 'Failed to process configuration details');
 //     }
 // };
@@ -48,7 +46,6 @@ import { runDnacSyncJob, syncDnacGoldenImages, syncDnacSites } from '../schedule
 export const deviceDetails = async (req, res) => {
     try {
         const db_connect = dbo && dbo.getDb();
-        logger.info({ msg: 'DNAC deviceDetails: Fetching claimed devices', status: true });
         let claimedDevices = await db_connect
             .collection("siteclaimdata")
             .find({claimStatus:true,isDeleted:false,dayNBoarding:false}) // Fetch only claimed devices that are not deleted
@@ -67,9 +64,8 @@ export const deviceDetails = async (req, res) => {
             data: claimedDevices
         });
     } catch (err) {
+        logDnacError('error', { msg: `Error in getClaimedDevices: ${err}`, status: false });
         const errorMsg = { msg: `Error in getClaimedDevices: ${err}`, status: false };
-        logger.error(errorMsg);
-        console.log(errorMsg);
         return sendError(res, 500, 'Failed to fetch claimed devices');
     }
 };
@@ -79,7 +75,7 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
     try {
         const db_connect = dbo.getDb(); // get your db connection
         const snmpLocation = req.query.snmpLocation;
-        logger.info({ msg: 'DNAC getSiteClaimAndPnpTemplateBySourceUrl: called', snmpLocation, status: true });
+        logDnacResponse('getSiteClaimAndPnpTemplateBySourceUrl.snmpLocation', snmpLocation);
         // if (!source_url) {
         //     return res.status(400).json({ error: "Missing source_url in query" });
         // }
@@ -122,7 +118,7 @@ export const getSiteClaimAndPnpTemplateBySourceUrl = async (req, res) => {
             matchedPNPTemplate: matchedRecord || null,
         });
     } catch (err) {
-        logger.error({ msg: `Error in getSiteClaimAndPnpTemplateBySourceUrl: ${err}`, error: err, status: false });
+        logDnacError('getSiteClaimAndPnpTemplateBySourceUrl.error', err);
         return sendError(res, 500, 'Failed to fetch site claim and PNP template');
     }
 };
@@ -133,31 +129,40 @@ export const pingDevice = async (req, res) => {
     try {
         
         let { device, dnacUrl,ip,hostname } = req.body;
+        logDnacResponse('afteronboarding pingDevice requestBody', req.body);
         let payloadDevice = device;
         device = device?.split(" ")[0]; // Extract IP from device string
         if (!ip || !device || !dnacUrl) {
-            logger.error({ msg: "Unable to get ip,device or dnac url ", status: false })
-            console.log({ msg: "Unable to get ip,device or dnac url ", status: false })
+            logDnacError('error', { msg: "Unable to get ip,device or dnac url ", status: false });
             return res.send({ msg: "Unable to get ip,device or dnac url ", status: false })
         }
 
         const db_connect = dbo && dbo.getDb();
         const existingData = await db_connect.collection('dayN_onboarding').findOne(
             {dnacUrl: dnacUrl, device: device, hostname: hostname})
-
+        logDnacResponse('pingDevice existingData from db', existingData);
         if (existingData?.newMgmtIp) {
             // If data already exists, return it
             device = existingData?.newMgmtIp;
         }
         let finalOutput = await dnacResponse(dnacUrl, device, ip)
 
-        logger.info({ msg: 'DNAC pingDevice API Response', dnacUrl, device, ip, finalOutput });
+        logDnacResponse("onboarding.pingDeviceIfPart", { finalOutput,dnacUrl, device, ip, payloadDevice, hostname });
         if (!finalOutput.status) {
-            // if (Object.keys(finalOutput).length == 0 || !finalOutput.status) {
-            logger.error(finalOutput)
+            logDnacError("onboarding.pingDeviceIfPart", {finalOutput, dnacUrl, device, ip, payloadDevice, hostname })
             return res.send(finalOutput)
         }
-        let pingStatus = finalOutput?.data?.includes("Success rate is 100 percent (5/5)")
+        // let pingStatus = finalOutput?.data?.includes("Success rate is 100 percent (5/5)")
+        // Success rate percent extract karna
+        let match = finalOutput?.data?.match(/Success rate is (\d+)\s*percent/);
+        logDnacResponse("pingDevice Success rate", match);
+        logger.info(`pingDevice Success rate: ${match}`);
+        let pingStatus = false;
+
+        if (match) {
+            let rate = parseInt(match[1]); // percent value
+            pingStatus = rate > 0; // true agar 0 se upar hai
+        }
         if (pingStatus) {
             await db_connect.collection('dayN_onboarding').findOneAndUpdate(
                 {
@@ -181,20 +186,18 @@ export const pingDevice = async (req, res) => {
             );
 
             let resultMsg = { msg: "Gateway reachable from the current management IP", status: true }
-            console.log(resultMsg)
-            logDnacResponse("onboarding.pingDeviceIfPart",resultMsg)
+            logDnacResponse("onboarding.pingDevice final Response send to user from if part",resultMsg)
             return res.send(resultMsg)
         } else {
             let resultMsg = { msg: "Gateway unreachable from the current management IP. Please verify connectivity.", status: false }
             console.log(resultMsg)
-            pingDevice("onboarding.pingDeviceelsePart",resultMsg)
+            logDnacResponse("onboarding.pingDevice final Response send to user from else part",resultMsg)
             return res.send(resultMsg)
         }
 
     } catch (err) {
         let resultMsg = { msg: `Failed to pingDevice:${err}`, status: false }
-        logger.error(resultMsg)
-        // return res.send({ msg: `Failed to pingDevice`, status: false })
+        logDnacError("onboarding.pingDeviceError catch Error", resultMsg)
         return sendError(res, 500, 'Failed to ping Device');
     }
 
@@ -230,6 +233,7 @@ export const networkDevice = async (device) => {
         // await new Promise(resolve => setTimeout(resolve, 2000));
         const response = await axios.request(config);
         if (Object.keys(response).length == 0 || Object.keys(response?.data).length == 0 || Object.keys(response?.data?.SearchResult).length == 0 || response?.data?.SearchResult?.resources?.length == 0) {
+            // logDnacResponse("onboarding.networkDeviceError", { msg: "Unable to get network device from ISE",data:response.data, status: false });
             return { data: [], msg: "Unable to get network device from ISE", status: false }
         }
         let networkDeviceOutput = response?.data?.SearchResult?.resources
@@ -273,7 +277,6 @@ export const networkDevice = async (device) => {
         //     const response2 = await axios.request(config);
         //     // const response2 = await axios.request(config2);
         //     if (Object.keys(response2).length == 0 || Object.keys(response2.data).length == 0 || Object.keys(response2.data.NetworkDevice).length == 0) {
-        //         logger.error({ msg: `${item?.link?.href} not working.`, status: false })
         //         console.log({ msg: `${item?.link?.href} not working.`, status: false })
         //         output.push({ ...item, msg: `${item?.link?.href} not working.`, createdAt: new Date(), updatedAt: new Date() })
         //     } else {
@@ -282,13 +285,28 @@ export const networkDevice = async (device) => {
         // }
     } catch (err) {
         let msgOutput = { fileId: "", msg: `Error in taskResponse:${err.message || err}`, status: false }
-        logger.error({ msg: `Error in networkDevice: ${err}`, error: err, status: false });
+        logDnacError("onboarding.networkDeviceError", msgOutput)
         return msgOutput
     }
 };
 
-const generateInterfaceConfig = async(interfaceLevel) => {
+function normalizeInterfaceName(shortName) {
+        if (shortName.startsWith("Gi")) return shortName.replace("Gi", "GigabitEthernet");
+        if (shortName.startsWith("Te")) return shortName.replace("Te", "TenGigabitEthernet");
+        if (shortName.startsWith("Fa")) return shortName.replace("Fa", "FastEthernet");
+        if (shortName.startsWith("Ap")) return shortName.replace("Ap", "AppGigabitEthernet");
+        return shortName; // fallback
+    }
+
+const generateInterfaceConfig = async(interfaceLevel,stormObj) => {
     let interfaceConfig = "";
+ // ✅ stormObj ek object hai, usko map ke jaisa hi use karenge
+    const stormMap = {};
+    Object.entries(stormObj).forEach(([intf, storm]) => {
+        const normalized = normalizeInterfaceName(intf);
+        stormMap[normalized] = storm;
+    });
+
 
     interfaceLevel.forEach((item) => {
         const interfaces = item?.interface || [];
@@ -298,6 +316,8 @@ const generateInterfaceConfig = async(interfaceLevel) => {
         const voiceVlan = item?.voice_vlan || "X";
 
         interfaces.forEach((intf) => {
+             const normalizedIntf = normalizeInterfaceName(intf);
+            const stormValue = stormMap[normalizedIntf] || "0.03";
             interfaceConfig += `interface ${intf}\n`;
             interfaceConfig += `description ${descRaw}\n`;
 
@@ -318,8 +338,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -342,8 +362,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -366,8 +386,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -390,8 +410,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -413,8 +433,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -437,8 +457,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -461,8 +481,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -485,8 +505,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -508,8 +528,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -532,8 +552,8 @@ authentication port-control auto
 authentication violation restrict
 mab
 dot1x pae authenticator
-storm-control broadcast level 3.00
-storm-control multicast level 3.00
+storm-control broadcast level ${stormValue}
+storm-control multicast level ${stormValue}
 spanning-tree portfast
 spanning-tree bpduguard enable
 storm-control action trap
@@ -553,27 +573,29 @@ no shutdown
 export const configurationDetails = async (req, res) => {
     try {
         let data = req.body
+        logDnacResponse('configurationDetails requestBody data', req.body);
         // const db_connect = dbo && dbo.getDb();
         if (!db_connect) {
-            logger.error({ msg: "Unable to connect to database.", status: false })
+            logDnacError('error', { msg: "Unable to connect to database.", status: false });
             return res.send({ msg: "Unable to connect to database.", status: false })
         }
         if (!data || Object.keys(data).length == 0 || data.interfaceLevel.length == 0) {
-            logger.error({ msg: "Unable to get data from user.", status: false })
+            logDnacError('error', { msg: "Unable to get data from user.", status: false });
             return res.send({ msg: "Unable to get data from user.", status: false })
         }
         const { interfaceLevel } = data;
         let interfaceConfig = ""
         const cliOutput = await run_show_command_on_device(data?.dnac, data?.device, 'show interfaces status');
+        logDnacResponse(`configurationDetails.cliOutput from device ${data?.device} ${data?.dnacUrl}`, cliOutput);
         const stormValues = getStormControlValue(cliOutput);
-        console.log(stormValues, "stormValues from cli output");
-        logger.info({ msg: "stormValues from cli output", stormValues, status: true })
+        logDnacResponse('configurationDetails.stormValues', stormValues);
         
         const configOutput = generateInterfaceConfig(req.body.interfaceLevel,data?.device,data.dnacUrl);
         if (!configOutput) {
-            logger.error({ msg: "Unable to make interface configuration", status: false })
+            logDnacError('error', { msg: "Unable to make interface configuration", configOutput,status: false });
             return res.json({ msg: "Unable to make interface configuration", status: false })
         }
+        logDnacResponse(`configurationDetails.configOutput from device ${data?.device}`,  configOutput);
         interfaceConfig = configOutput.slice(0, -1)
         let dnacData = {
             config: interfaceConfig,
@@ -581,23 +603,20 @@ export const configurationDetails = async (req, res) => {
             device: data?.device,
         }
         let excuteConfigInDnac = await execute_templates(dnacData)
+        logDnacResponse('configurationDetails.excuteConfigInDnac', { excuteConfigInDnac, dnacData });
         let msgs = {};
         if (excuteConfigInDnac == "SUCCESS") {
             msgs = { msg: "Device configured successfully.", status: true }
         } else {
-            logger.error({ msg: "Unable to configured device.", status: false })
+            logDnacError('error', { msg: "Unable to configured device.", excuteConfigInDnac,status: false });
             msgs = { msg: "Unable to configured device.", status: false }
         }
         let details = { ...data, config: interfaceConfig, createdAt: new Date(), updatedAt: new Date() }
         let saveData = await db_connect.collection('ms_interfaceConfig').insertOne(details);
-        logger.info({ msg: 'DNAC configurationDetails: ms_interfaceConfig inserted', status: !!saveData });
+        logDnacResponse('configurationDetails.saveData Final Response send to user', { saveData, dnacUrl: data?.dnacUrl, device: data?.device, interfaceConfig, msgs });
         return res.json(msgs)
-        // check device exist in ISE or not
-        // let iseNetworkDevice = await networkDevice(data?.device)
-        // return res.send(iseNetworkDevice)
     } catch (err) {
-        console.log(`Error in configuration:${err}`)
-        logger.error({ msg: `Error in configurationDetails:${err}`, status: false })
+        logDnacError('error', { msg: `Error in configurationDetails: ${err}`, status: false });
         let msgError = { msg: `Error in configurationDetails:${err.message}`, status: false }
         return sendError(res, 500, 'Failed to process configuration details');
     }
@@ -607,10 +626,10 @@ export const configurationDetails = async (req, res) => {
 export const validateDataFromDnac = async (dnacUrl, device) => {
     try {
         let commanCredential = await commonCredentials(device, dnacUrl)
-        logger.info({ msg: 'DNAC validateDataFromDnac: commonCredentials fetched', dnacUrl, device, status: !!commanCredential.token });
+        logDnacResponse('validateDataFromDnac.commonCredentials', { commanCredential, dnacUrl, device });
         const { token } = commanCredential
         if (token == "") {
-            logger.error({ msg: `Device is configured successfully but unable to get token in validData`, status: false })
+            logDnacError('validateDataFromDnac.tokenError', { msg: "Unable to get token in validData", commanCredential,status: false });
             let msgError = { msg: `Device is configured successfully but unable to get token in validData`, status: false }
             return msgError
         }
@@ -629,19 +648,18 @@ export const validateDataFromDnac = async (dnacUrl, device) => {
         let result = await axios.request(config)
         if (result && result.status == 200) {
             // console.log("The device is successfully configured and accessible.")
-            logger.error({ msg: `The device is successfully configured and accessible`, status: true })
+            logDnacResponse('validateDataFromDnac.success', { data:result.data, dnacUrl, device });
             let msg = { msg: `The device is successfully configured and accessible`, status: true }
             return msg
         } else {
-            console.log("The device is successfully configured but not accessible.", result)
-            logger.error({ msg: `The device is successfully configured but not accessible:${result}`, status: false })
+            console.log("The device is successfully configured but not accessible.", result.data)
+            logDnacError('validateDataFromDnac.accessError', { data: result.data, dnacUrl, device });
             let msg = { msg: `The device is successfully configured but not accessible`, status: false }
             return msg
         }
 
     } catch (err) {
-        console.log("Error in validateDataFromDnac", err)
-        logger.error({ msg: `Error in validateDataFromDnac:${err.message}`, status: false })
+        logDnacError('validateDataFromDnac.error', { msg: `Error in validate Data From Dnac: ${err}`, status: false });
         let msgError = { msg: `Error in validate Data From Dnac`, status: false }
         return msgError
     }
@@ -699,7 +717,7 @@ function getShutdownInterfaces(interfaceLevel, deviceInterfaces) {
         }
         return inter;
     } catch (err) {
-        logger.error({ msg: 'Error in dnacDeviceInterfaces', error: err, status: false });
+        logDnacError('getDeviceInterfaces.error', { msg: `Error in getDeviceInterfaces: ${err}`, status: false });
         return 'Failed to fetch device interfaces'
     }
 };
@@ -708,29 +726,43 @@ function getShutdownInterfaces(interfaceLevel, deviceInterfaces) {
 export const tacacsAndRadiusConf = async (req, res) => {
     try {
         let data = req.body
-        // const cliOutput = await run_show_command_on_device(data?.dnacUrl, data?.device, 'show interfaces status');
-        // const stormValues = getStormControlValue(cliOutput);
-        // console.log(stormValues, "stormValues from cli output");
+        logDnacResponse('tacacsAndRadiusConf requestBody data', req.body);
+        const db_connect = dbo && dbo.getDb();
+        const payloadDevice = data.device;
+        const existingData = await db_connect.collection('dayN_onboarding').findOne(
+            { dnacUrl: data.dnacUrl, device: data.device, hostname: data.host_name })
+        logDnacResponse('tacacsAndRadiusConf.existingData', existingData);
+        if (existingData?.newMgmtIp) {
+            // If data already exists, return it
+            data.device = existingData?.newMgmtIp;
+        }
+        const cliOutput = await run_show_command_on_device(data?.dnacUrl, data?.device, 'show interfaces status');
+        logDnacResponse(`tacacsAndRadiusConf.cliOutput from device ${data?.device} ${data?.dnacUrl}`, cliOutput);
+        const stormValues = getStormControlValue(cliOutput.output);
+        logDnacResponse('tacacsAndRadiusConf.stormValues from cli output', stormValues);
+        console.log(stormValues, "stormValues from cli output");
         const deviceInterfaces = await getDeviceInterfaces(data?.dnacUrl, data?.device);
-        logger.info({ msg: 'DNAC tacacsAndRadiusConf: getDeviceInterfaces called', dnacUrl: data?.dnacUrl, device: data?.device, status: !!deviceInterfaces });
+        logDnacResponse('tacacsAndRadiusConf.deviceInterfaces from data device', deviceInterfaces);
         const shutdownInterface = getShutdownInterfaces(req.body.interfaceLevel, deviceInterfaces);
+        logDnacResponse('tacacsAndRadiusConf.shutdownInterface from getShutdownInterfaces', shutdownInterface);
         const shutdownConfig = shutdownInterface.join('\n'); // 🔁 Convert array to single string
-
-        const configOutput = await generateInterfaceConfig(req.body.interfaceLevel);
+        logDnacResponse('tacacsAndRadiusConf.shutdownConfig convert array to single string', shutdownConfig);
+        const configOutput = await generateInterfaceConfig(req.body.interfaceLevel,stormValues);
+        logDnacResponse('tacacsAndRadiusConf.configOutput from genrate interface config', configOutput);
         if (data && data?.registrationData.length == 0) {
-            logger.error({ msg: `Unable to get data from user.`, status: false })
+            logDnacError('tacacsAndRadiusConf.registrationDataError', { msg: "Registration data is empty", data });
             let msgError = { msg: `Unable to get data from user.`, status: false }
             return sendError(res, 500, 'Failed to process configuration details');
         }
         if (data && data?.device == "") {
-            logger.error({ msg: `Please select device.`, status: false })
+            logDnacError('tacacsAndRadiusConf.deviceError', { msg: "Device is not selected", data });
             let msgError = { msg: `Please select device.`, status: false }
             return sendError(res, 500, 'Failed to process configuration details');
         }
         let radiusServerData = data?.registrationData.filter((item) => { return item.type === "radiusServer" })
         let tacacsServerData = data?.registrationData.filter((item) => { return item.type === "TACACS" })
         if (radiusServerData.length == 0 && tacacsServerData.length == 0) {
-            logger.error({ msg: `Radius and TACACS server data is not available.`, status: false })
+            logDnacError('tacacsAndRadiusConf.radiusTACACSError', { msg: "Radius and TACACS server data is not available", data });
             let msgError = { msg: `Radius and TACACS server data is not available.`, status: false }
             return sendError(res, 500, 'Failed to process configuration details');
         };
@@ -745,7 +777,7 @@ export const tacacsAndRadiusConf = async (req, res) => {
             radiusGroup += `\nserver name ${radiusName}`;
         }
 
-        radiusBlock += `radius-server attribute 6 on-for-login-auth
+        radiusBlock += `\nradius-server attribute 6 on-for-login-auth
 radius-server attribute 8 include-in-access-req
 radius-server attribute 25 access-request include
 radius-server dead-criteria time 5 tries 2
@@ -785,28 +817,26 @@ ip radius source-interface ${sourceInterface}`;
 aaa new-model
 aaa session-id common
 ${defaultConfig}
-${radiusBlock}
-${radiusServers}
-${radiusGroup}
-${tacacsGroup}
-${ipInterfaceBlock}
+${radiusBlock.trim()}
+${radiusServers.trim()}
+${radiusGroup.trim()}
+${tacacsGroup.trim()}
+${ipInterfaceBlock.trim()}
 `;
-
-        console.log("config2", config)
-        logger.info({ msg: "Configuration created.",config });
+         logDnacResponse('tacacsAndRadiusConf.config', { msg: "config", data: config });
         // let finalConfig = `${configOutput}\n${config}`;
         let finalConfig = `${configOutput}\n${shutdownConfig}\n${config}`;
 
         let Data = {
             config: finalConfig,
             dnac: data?.dnacUrl,
-            device: data?.device
+            device: payloadDevice
         }
+        logDnacResponse('tacacsAndRadiusConf.Data final configuration created',{finalConfig: finalConfig , data: Data});
         return res.json({ msg: "configured Created successfully.", status: true, Data })
 
     } catch (err) {
-        console.log("Error in tacacsAndRadiusConf", err)
-        logger.error({ msg: `Error in tacacsAndRadiusConf: ${err}`, status: false })
+        logDnacError('tacacsAndRadiusConf.error', { msg: `Error in tacacsAndRadiusConf: ${err}`, status: false });
         let msgError = { msg: `Error in tacacsAndRadiusConf: ${err.message}`, status: false }
         return sendError(res, 500, 'Failed to process configuration details');
     }
@@ -821,6 +851,7 @@ ${ipInterfaceBlock}
 export const configureDevice = async (req, res) => {
     try {
         let { config, dnac, device } = req.body.commandData;
+        logDnacResponse('configureDevice.requestBody data ', req.body);
         let payloadDevice = device;
         const { host_name, mgmtL3Ip, ip, serialNumber, vtpDomainName, vtpVersion } = req.body;
         const db_connect = dbo && dbo.getDb();
@@ -840,7 +871,7 @@ export const configureDevice = async (req, res) => {
 
         const dnacData = { config, dnac: dnac, device };
         const executeResult = await execute_templates(dnacData);
-
+       logDnacResponse('configureDevice.executeResult from execute_templates', { executeResult, dnacData });
         if (executeResult === "SUCCESS") {
             await db_connect.collection('dayN_onboarding').findOneAndUpdate(
                 {
@@ -852,7 +883,6 @@ export const configureDevice = async (req, res) => {
                     $set: {
                         dayNStatus: true,
                         dayNresult: executeResult,
-                        newMgmtIp: mgmtL3Ip || ip,
                         serialNumber: serialNumber,
                         vtpDomainName: vtpDomainName,
                         vtpVersion: vtpVersion,
@@ -882,7 +912,7 @@ export const configureDevice = async (req, res) => {
             );
 
             const validateResponse = await validateDataFromDnac(dnac, device);
-            logger?.info(validateResponse);
+            logDnacResponse('configureDevice.validateResponse from validateDataFromDnac', { validateResponse, dnac, device });
             return res.json(validateResponse);
         } else {
              await db_connect.collection('dayN_onboarding').findOneAndUpdate(
@@ -895,7 +925,6 @@ export const configureDevice = async (req, res) => {
                     $set: {
                         dayNStatus: false,
                         dayNresult: executeResult,
-                        newMgmtIp: mgmtL3Ip || ip,
                         serialNumber: serialNumber,
                         vtpDomainName: vtpDomainName,
                         vtpVersion: vtpVersion,
@@ -914,7 +943,7 @@ export const configureDevice = async (req, res) => {
         }
 
     } catch (error) {
-        logger.error({ msg: `DNAC Configuration Error: ${error}`, error: error, status: false });
+        logDnacError('configureDevice.error', { msg: `Error in configureDevice: ${error.message}`, status: false });
         return res.status(500).json({
             status: false,
             msg: "Error configuring device via DNAC.",
@@ -1052,7 +1081,7 @@ export const configureDeviceInISE = async (req, res) => {
 
         // await new Promise(resolve => setTimeout(resolve, 2000));
         const response = await axios.request(config);
-        console.log("response", response)
+        logDnacResponse( "Network Device Creation",response.data);
 
         // axios.post(`${iseHost}`, deviceData, {
         //     headers: {
@@ -1134,14 +1163,14 @@ export const pnpDatafromDB = async (req, res) => {
         let getPNPData = await db_connect.collection('pe_devices_config').find({}).toArray();
         if (getPNPData.length == 0) {
             console.log("Unbale to get pnp data from db")
-            logger.error({ msg: `"Unbale to get pnp data from db"`, status: fasle })
+            logDnacError('pnpDatafromDB.error', { msg: "Unbale to get pnp data from db", status: false });
             let msg = { msg: `"Unbale to get pnp data from db"`, status: false }
             return sendError(res, 500, 'Failed to fetch PNP data from DB');
         }
         res.json({ data: {"Sheet1":getPNPData}, status: true })
 
     } catch (err) {
-        logger.error({ msg: `Error in pnpDatafromDB:${err}`, status: false });
+        logDnacError('pnpDatafromDB.error', { msg: `Error in pnpDatafromDB: ${err}`, status: false });
         let msg = { msg: `Error in pnpDatafromDB:${err.message}`, status: false };
         return sendError(res, 500, 'Failed to fetch PNP data from DB');;
     }
@@ -1269,7 +1298,7 @@ export const getRadiusConfiguration = async (req, res) => {
         });
 
     } catch (error) {
-        logger.error({ msg: 'Error in getRadiusConfiguration', error, status: false });
+        logDnacError('getRadiusConfiguration.error', { msg: `Error in getRadiusConfiguration: ${error.message}`, status: false });
         return sendError(res, 500, 'Failed to fetch radius configuration');
     }
 };
@@ -1279,6 +1308,7 @@ export const getRadiusConfiguration = async (req, res) => {
 export const deployDefaultGateway = async (req, res) => {
   try {
     let { dnac, device, gateway_ip,hostname } = req.body;
+    logDnacResponse('deployDefaultGateway requestBody data', req.body);
     let payloadDevice = device;
     if (!dnac || !device || !gateway_ip) {
       return res.status(400).json({ msg: "Missing required fields", status: false });
@@ -1286,7 +1316,7 @@ export const deployDefaultGateway = async (req, res) => {
     const db_connect = dbo && dbo.getDb();
     const existingData = await db_connect.collection('dayN_onboarding').findOne(
             {dnacUrl: dnac, device: device, hostname: hostname})
-
+        logDnacResponse('deployDefaultGateway.existingData exist in db', existingData);
         if (existingData?.newMgmtIp) {
             // If data already exists, return it
             device = existingData?.newMgmtIp;
@@ -1297,19 +1327,23 @@ export const deployDefaultGateway = async (req, res) => {
       config: 
         `ip default-gateway ${gateway_ip}`
     };
+    logDnacResponse('item to be sent to execute_templates DNAC Payload', item);
     const result = await execute_templates(item);
-    logger.info({ msg: 'DNAC deployDefaultGateway: execute_templates called', dnac, device, status: !!result });
+    logDnacResponse("deployDefaultGateway execute_templates result", result);
     if (typeof result === 'string' || result.status === true) {
       await db_connect.collection("dayN_onboarding").updateOne(
       { dnacUrl: dnac, device: payloadDevice, hostname:hostname},
       { $set: { gateway_ip: gateway_ip,configure_gateway_ip: true } }
     );
+    logDnacResponse('deployDefaultGateway.gateway_ip updated in db', { dnacUrl: dnac, device: payloadDevice, hostname:hostname, gateway_ip: gateway_ip });
       return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
     } else {
+    logDnacResponse('deployDefaultGateway.execute_templates failed', { result, item });
       return res.status(500).json({ msg: "Failed to configure default gateway", result,status: false });
     }
 
   } catch (error) {
+    logDnacError('deployDefaultGateway.error', { msg: `Error in deployDefaultGateway: ${error.message}`, status: false });
     console.error("Controller error:", error.message || error);
     return sendError(res, 500, 'Failed to process request');
   }
@@ -1319,6 +1353,7 @@ export const deployDefaultGateway = async (req, res) => {
 export const getCommandOutput = async (req, res) => {
   try {
     const { dnac, device, gateway_ip } = req.body;
+    logDnacResponse('getCommandOutput requestBody data', req.body);
 
     if (!dnac || !device || !gateway_ip) {
       return res.status(400).json({ msg: "Missing required fields", status: false });
@@ -1332,15 +1367,16 @@ export const getCommandOutput = async (req, res) => {
     };
 
     const result = await run_show_command_on_device(dnac,device, item.config);
-    logger.info({ msg: 'DNAC getCommandOutput: run_show_command_on_device called', dnac, device, status: !!result });
-    if (typeof result === 'string' || result.status === true) {
-      return res.status(200).json({ msg: "Default gateway IP configured successfully" , status: true });
+    logDnacResponse("getCommandOutput run_show_command_on_device called", result);
+    if (result.status === true) {
+      return res.status(200).json({ msg: "command output fetched successfully" , status: true,result });
     } else {
-      return res.status(500).json({ msg: "Failed to configure default gateway", result,status: false });
+      return res.status(500).json({ msg: "Failed to fetch command output", result,status: false ,result});
     }
 
   } catch (error) {
     console.error("Controller error:", error.message || error);
+    logDnacError('getCommandOutput.error', { msg: `Error in getCommandOutput: ${error.message}`, status: false });
     return sendError(res, 500, 'Failed to process request');
   }
 };
@@ -1353,6 +1389,7 @@ export const getPnpClaimedDevices = async (req, res) => {
         let claimedDevices = await db_connect
             .collection("siteclaimdata")
             .find({isDeleted:false })
+            .sort({ createdAt: -1 }) 
             .toArray();
 
         if (claimedDevices.length === 0) {
@@ -1370,8 +1407,7 @@ export const getPnpClaimedDevices = async (req, res) => {
         });
     } catch (err) {
         const errorMsg = { msg: `Error in getClaimedDevices: ${err}`, status: false };
-        logger.error(errorMsg);
-        console.log(errorMsg);
+        logDnacError('getPnpClaimedDevices.error', errorMsg);
         return sendError(res, 500, 'Failed to fetch claimed devices');
     }
 };
@@ -1396,7 +1432,7 @@ export const getDeviceStatus = async (req, res) => {
                 httpsAgent: new https.Agent({ rejectUnauthorized: false }) // If self-signed
             }
         );
-        logger.info({ msg: 'DNAC getDeviceStatus API call successful', dnacUrl, serialNumber, status: true });
+        logDnacResponse('getDeviceStatus', { serialNumber, dnacUrl, response: response.data });
         const device = response.data[0];
 
         if (!device) {
@@ -1441,8 +1477,8 @@ export const getDeviceStatus = async (req, res) => {
 
 export const getDeviceBySerial = async (req, res) => {
     try {
-        const { serialNumber, dnacUrl } = req.query;
-
+        let { serialNumber, dnacUrl, hostname,ip } = req.query;
+        logDnacResponse('getDeviceBySerial request query data', req.query);
         if (!serialNumber) {
             return sendError(res, 400, 'Serial number is required');
         }
@@ -1451,7 +1487,7 @@ export const getDeviceBySerial = async (req, res) => {
         let commanCredential = await commonCredentials('', dnacUrl)
         const { token } = commanCredential;
         if (!token) {
-            logger.error({ msg: 'Failed to fetch token from DNAC', dnacUrl, status: false });
+            logDnacError('getDeviceBySerial.error', { msg: "Failed to fetch token from DNAC", commanCredential,dnacUrl,hostname,ip,status: false });
             return sendError(res, 400, 'Failed to fetch token from DNAC');
         }
         const httpsAgent = new https.Agent({
@@ -1463,57 +1499,19 @@ export const getDeviceBySerial = async (req, res) => {
             },
             httpsAgent: httpsAgent
         });
-        logger.info({ msg: 'DNAC getDeviceBySerial API call successful', dnacUrl, serialNumber, status: true });
         const device = response.data.response[0] || [];
+        logDnacResponse('getDeviceBySerial', { serialNumber, dnacUrl, device });
         if (device && device.length === 0) {
-            logger.error({ msg: 'Device not found for provided serial number', serialNumber, status: false });
+            logDnacError('getDeviceBySerial.error', { msg: "Device not found for provided serial number", serialNumber,device, status: false });
             return res.status(200).json({
                 msg: "Device not found for provided serial number",
                 serialNumber,
                 status: false
             });
         }
-        logger.info(device, "Device details fetched from DNAC");
-        // const dbObject = {
-        //     host_name: device.hostname,
-        //     family: device.family,
-        //     device_type: device.type,
-        //     software_type: device.softwareType,
-        //     managementIpAddress: device.managementIpAddress,
-        //     mac_address: device.macAddress,
-        //     software_version: device.softwareVersion,
-        //     role: device.role,
-        //     device_id: device.id,
-        //     device_model: device.platformId ? [device.platformId] : [],
-        //     device_series: device.series,
-        //     serial_number: device.serialNumber,
-        //     site_id: '',
-        //     ssh_username: '',
-        //     ssh_password: '',
-        //     uptime: device.upTime,
-        //     created_date: device.lastUpdated || new Date().toISOString(),
-        //     source_url: device.sourceUrl || "DNAC",
-        //     source: 'DNAC',
-        //     reachabilityStatus: device.reachabilityStatus,
-        //     vendor: 'Cisco',
-        //     audit_device: 'false',
-        //     is_processing: 'DNAC',
-        //     is_excution_type: 'DNAC',
-        // };
-       
-        // await db_connect.collection('ms_device').updateOne(
-        //     {
-        //         serial_number: dbObject.serial_number,
-        //         managementIpAddress: dbObject.managementIpAddress
-        //     },
-        //     { $set: dbObject },
-        //     { upsert: true }
-        // );
-
 
         const platformId = device.platformId ? device.platformId.trim() : null;
-        logger.info("Platform ID from DNAC is :", platformId);
-
+        logDnacResponse('getDeviceBySerial platformId', { platformId, device });
         if (platformId) {
             const deviceDetails = {
                 hostname: device.hostname,
@@ -1525,27 +1523,42 @@ export const getDeviceBySerial = async (req, res) => {
                 template_name: { $regex: /testing/i },
                 is_mandatory: "true" 
             }).toArray();
-            logger.info({ msg: 'DNAC getDeviceBySerial: ms_compliance_templates fetched', count: matchingTemplates.length, status: true });
-            logger.info("Matching templates found:", matchingTemplates);
+            if( matchingTemplates.length === 0) {
+                logDnacResponse('No matching compliance templates found', { platformId, deviceDetails });
+                return res.status(200).json({
+                    msg: "No matching compliance templates found for the device",
+                    device: matchingTemplates,
+                    status: false
+                });
+            }
+            logDnacResponse('Matching compliance templates found', { platformId, matchingTemplates });
             const output = matchingTemplates.map((template) => ({
                 ...template,
                 ...deviceDetails
             }));
-
-            logger.info("********** Matched Compliance Templates ******************** :", matchingTemplates);
-            logger.info("********** Matched Compliance Templates Output ******************** :", output);
+            if (output.length === 0) {
+                logDnacResponse('No matching compliance templates found for the device', { platformId, deviceDetails });
+                return res.status(200).json({
+                    msg: "Template Data Not Found",
+                    device: output,
+                    status: false
+                });
+            }
+            logDnacResponse('Matching compliance templates found', { platformId, output,serialNumber });
             return res.status(200).json({
                 msg: "Device found and compliance templates matched",
                 device: output,
                 status: true
             });
         } else {
-            console.log("No platformId found for this device — skipping compliance match.");
-            // logger.info("No platformId found for this device — skipping compliance match.");
+            logDnacResponse('No platformId found for this device', { device, platformId , serialNumber});
+             return res.status(200).json({
+                msg: "No platformId found for this device",
+                status: false
+            });
         }
     } catch (error) {
-        console.error("Error fetching PnP device by serial number:", error.message);
-        logger.error({ msg: "Error fetching PnP device by serial number", error: error.message, status: false });
+        logDnacError('getDeviceBySerial.error', { msg: `Error in getDeviceBySerial: ${error}`, status: false });
         return res.status(500).json({
             msg: "Failed to retrieve device by serial number",
             error: error.message,
@@ -1557,10 +1570,9 @@ export const getAllDevices = async (req, res) => {
   try {
     const db_connect = dbo && dbo.getDb();
     const devices = await db_connect.collection("pe_devices_config").find({}).toArray();
-    logger.info({ msg: 'DNAC getAllDevices: siteclaimdata fetched', count: devices.length, status: true });
     res.status(200).json({devices});
   } catch (error) {
-    logger.error({ msg: 'Failed to fetch devices', error, status: false });
+    logDnacError('getAllDevices.error', { msg: `Error in getAllDevices: ${error}`, status: false });
     return sendError(res, 500, 'Failed to fetch devices');
   }
 };
@@ -1582,7 +1594,7 @@ export const updateDeviceById = async (req, res) => {
 
     res.status(200).json({ message: 'Device updated successfully', status: true });
   } catch (error) {
-    logger.error({ msg: 'Failed to update device', error, status: false });
+    logDnacError('updateDeviceById.error', { msg: `Error in updateDeviceById: ${error}`, status: false });
     return sendError(res, 500, 'Failed to update device');
   }
 };
@@ -1602,7 +1614,7 @@ export const deleteDeviceById = async (req, res) => {
 
     res.status(200).json({ message: 'Device deleted successfully', status: true });
   } catch (error) {
-    logger.error({ msg: 'Failed to delete device', error, status: false });
+    logDnacError('deleteDeviceById.error', { msg: `Error in deleteDeviceById: ${error}`, status: false });
     return sendError(res, 500, 'Failed to delete device');
   }
 };
@@ -1612,10 +1624,9 @@ export const getAllDayNConfigs = async (req, res) => {
   try {
         const db_connect = dbo && dbo.getDb();
     const configs = await db_connect.collection("dayN_configs").find({}).toArray();
-    logger.info({ msg: 'DNAC getAllDayNConfigs: dayN_configs fetched', count: configs.length, status: true });
     res.status(200).json(configs);
   } catch (error) {
-    logger.error({ msg: 'Failed to fetch DayN configs', error, status: false });
+    logDnacError('getAllDayNConfigs.error', { msg: `Error in getAllDayNConfigs: ${error}`, status: false });
     return sendError(res, 500, 'Failed to fetch DayN configs');
   }
 };
@@ -1637,7 +1648,7 @@ export const updateDayNConfigById = async (req, res) => {
 
     res.status(200).json({ message: 'Config updated successfully', status: true });
   } catch (error) {
-    logger.error({ msg: 'Failed to update config', error, status: false });
+    logDnacError('updateDayNConfigById.error', { msg: `Error in updateDayNConfigById: ${error}`, status: false });
     return sendError(res, 500, 'Failed to update DayN config');
   }
 };
@@ -1655,14 +1666,14 @@ export const deleteDayNConfigById = async (req, res) => {
 
     res.status(200).json({ message: 'Config deleted successfully', status: true });
   } catch (error) {
-    logger.error({ msg: 'Failed to delete config', error, status: false });
+    logDnacError('deleteDayNConfigById.error', { msg: `Error in deleteDayNConfigById: ${error}`, status: false });
     return sendError(res, 500, 'Failed to delete DayN config');
   }
 };
 
 
 function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
-  logger.info("matchPidWithImageUdi", pnpPid, getImageIDResponse.response);
+    logDnacResponse('matchPidWithImageUdi called', { pnpPid, data:getImageIDResponse.response });
   const matches = [];
 
   const targetPid = (pnpPid || '').toUpperCase();
@@ -1674,14 +1685,12 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
     const rawUdi = image?.extendedAttributes?.udi;
     if (rawUdi) {
       const decodedUdi = decodeURIComponent(rawUdi);
-      logger.info("Decoded PID:", decodedUdi, "targetPid:", targetPid);
 
       const match = decodedUdi.match(/PID:\s*([^\s]+)/);
       const udiPid = match?.[1]?.toUpperCase();
-      logger.info(udiPid, targetPid, "matchPidWithImageUdi udiPid,targetPid");
 
       if (udiPid === targetPid) {
-        logger.info(`✅ Match found for PID in UDI: ${udiPid}`);
+        logDnacResponse(`✅ Match found in UDI for PID: ${targetPid}`, { image, udiPid });
         matched = true;
       }
     }
@@ -1694,7 +1703,6 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
             pid => (pid || '').toUpperCase() === targetPid
           );
           if (found) {
-            logger.info(`✅ Match found in applicableDevicesForImage for PID: ${targetPid}`);
             matched = true;
             break;
           }
@@ -1713,7 +1721,7 @@ function matchPidWithImageUdi(pnpPid, getImageIDResponse) {
       });
     }
   }
-
+logDnacResponse('matchPidWithImageUdi results', { targetPid, matches });
   return matches;
 }
 
@@ -1724,20 +1732,18 @@ export const getGoldenImage = async (req, res) => {
     try {
         const { dnacUrl, pid } = req.query;
         if (!dnacUrl) {
-            logger.error({ msg: "Missing 'dnacUrl' in query", status: false });
+            logDnacError('getGoldenImage.error', { msg: "Missing 'dnacUrl' in query", status: false });
             return sendError(res, 400, "Missing 'dnacUrl' in query");
         }
         const images = await dnacGoldenImageModel.find({ dnacUrl }).lean();
         if (!images || images.length === 0) {
-            logger.error({ msg: `No golden image found in DB for ${dnacUrl}`, status: false });
+            logDnacError('getGoldenImage.error', { msg: "No golden image found for the provided dnacUrl", dnacUrl, status: false });
             return sendError(res, 404, 'No golden image found');
         }
-        // matchPidWithImageUdi expects { response: [...] }
         const output = matchPidWithImageUdi(pid, { response: images });
-        logger.info({ msg: 'Fetched golden images from DB', dnacUrl, filtered: output.length, status: true });
         return res.status(200).json({ data: output, status: true });
     } catch (error) {
-        logger.error({ msg: `Error fetching golden image from DB: ${error}`, status: false });
+        logDnacError('getGoldenImage.error', { msg: `Error in getGoldenImage: ${error}`, status: false });
         return sendError(res, 500, 'Failed to fetch golden image from DB');
     }
 };
@@ -1747,6 +1753,7 @@ export const getGoldenImage = async (req, res) => {
 export const configureVtpmode = async (req, res) => {
     try {
         let { dnac, device, vtpmode, hostname } = req.body;
+        logDnacResponse('configureVtpmode requestBody data', req.body);
         
         if (!dnac || !device || !vtpmode) {
             return res.status(400).json({ msg: "Missing required fields", status: false });
@@ -1755,7 +1762,7 @@ export const configureVtpmode = async (req, res) => {
 
         const existingData = await db_connect.collection('dayN_onboarding').findOne(
             { dnacUrl: dnac, device: device, hostname: hostname })
-
+        logDnacResponse('configureVtpmode.existingData exist in db', existingData);
         if (existingData?.newMgmtIp) {
             device = existingData?.newMgmtIp;
         }
@@ -1765,9 +1772,9 @@ export const configureVtpmode = async (req, res) => {
             device,
             config: `vtp mode ${vtpmode}`
         };
-
+        logDnacResponse('item to be sent to execute_templates DNAC Payload', item);
         const result = await execute_templates(item);
-
+        logDnacResponse("configureVtpmode execute_templates result", result);
         if (typeof result === 'string' || result.status === true) {
             return res.status(200).json({ msg: "VTP mode configured successfully", status: true });
         } else {
@@ -1775,8 +1782,7 @@ export const configureVtpmode = async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Controller error:", error.message || error);
-        logger.error({ msg: `Error in configureVtpmode: ${error}`, status: false });
+        logDnacError('configureVtpmode.error', { msg: `Error in configureVtpmode: ${error}`, status: false });
         return sendError(res, 500, 'Failed to process request');
     }
 }   
@@ -1814,7 +1820,7 @@ export const updateMgmtIpAddress = async (req, res) => {
 
     } catch (error) {
         console.error("Controller error:", error.message || error);
-        logger.error({ msg: `Error in updateMgmtIpAddress: ${error}`, status: false });
+        logDnacError('updateMgmtIpAddress.error', { msg: `Error in updateMgmtIpAddress: ${error}`, status: false });
         return sendError(res, 500, 'Failed to process request');
     }
 }
@@ -1834,7 +1840,7 @@ export const syncDevicesWithDnac = async (req, res) => {
         };
 
         const result = await callSyncDevicesApi(payload);
-        logger.info({ msg: 'DNAC syncDevicesWithDnac API call', dnac, deviceIds, status: result?.status });
+        logDnacResponse('syncDevicesWithDnac called', { dnac, deviceIds, result });
         if (result?.status === true) {
             return res.status(200).json({ msg: "Device sync initiated successfully", status: true, data: result.data });
         } else {
@@ -1842,8 +1848,7 @@ export const syncDevicesWithDnac = async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Controller error:", error.message || error);
-        logger.error({ msg: `Error in syncDevicesWithDnac: ${error}`, status: false });
+        logDnacError('syncDevicesWithDnac.error', { msg: `Error in syncDevicesWithDnac: ${error}`, status: false });
         return sendError(res, 500, 'Failed to process request');
     }
 };
@@ -1852,22 +1857,22 @@ export const updateDeviceMgmtAddress = async (req, res) => {
     try {
         let { dnac, newIP,existMgmtIp,hostname } = req.body;
         const db_connect = dbo && dbo.getDb();
-
+        logDnacResponse('updateDeviceMgmtAddress requestBody data', req.body);
         if (!dnac || !newIP) {
             return res.status(400).json({ msg: "Missing required fields", status: false });
         }
 
         const existingData = await db_connect.collection('dayN_onboarding').findOne(
             { dnacUrl: dnac, device: existMgmtIp, hostname: hostname })
-
+        logDnacResponse('updateDeviceMgmtAddress.existingData exist in db update Management IP', existingData);
         if (existingData?.newMgmtIp) {
             // If data already exists, return it
             existMgmtIp = existingData?.newMgmtIp;
         }
         
-
+        logDnacResponse('updateDeviceMgmtAddress calling updateMgmtAddressHelper', { dnac, newIP, existMgmtIp });
         const result = await updateMgmtAddressHelper(dnac, newIP,existMgmtIp);
-
+        logDnacResponse('updateDeviceMgmtAddress.updateMgmtAddressHelper result', result);
         if (result.status === true) {
             await db_connect.collection("dayN_onboarding").updateOne(
                 { dnacUrl: dnac, device: existMgmtIp, hostname: hostname },
@@ -1877,14 +1882,15 @@ export const updateDeviceMgmtAddress = async (req, res) => {
                 { dnacUrl: dnac, ip: existMgmtIp, hostname: hostname },
                 { $set: { newMgmtIp : newIP,updatedAt: new Date() } }
             );
-            logger.info({ msg: 'Management IP updated successfully', dnac, newIP, status: true });
+            logDnacResponse('updateDeviceMgmtAddress IP updated successfully', { dnac, newIP, existMgmtIp, result });
             return res.status(200).json({ msg: "Management IP updated successfully", taskId: result.taskId, status: true });
         } else {
+            logDnacError('updateDeviceMgmtAddress failed to update', { dnac, newIP, existMgmtIp, result });
             return res.status(500).json({ msg: result.msg || "Failed to update Management IP", status: false });
         }
 
     } catch (error) {
-        logger.error({ msg: `Error in updateDeviceMgmtAddress: ${error.message}`, status: false });
+        logDnacError('updateDeviceMgmtAddress.error', { msg: `Error in updateDeviceMgmtAddress: ${error}`, status: false });
         return sendError(res, 500, 'Failed to process update Management IP');
     }
 };
@@ -1938,9 +1944,10 @@ export const checkIPGatewayStatus = async (req, res) => {
         if(!result?.gateway_ip) {   
             return res.status(200).json({ status: false, msg: "None IP gateway configured" });
         }
+        console.log("🚀 ~ file: afterOnboardingController.js:370 ~ checkIPGatewayStatus ~ result:", result)
         return res.status(200).json({ status: result.configure_gateway_ip || false, msg: `Earlier Configured gateway Ip ${result.gateway_ip}` });
     } catch (error) {
-        logger.error({ msg: `Error fetching check IPGateway Status: ${error.message}`, status: false });
+        logDnacError('checkIPGatewayStatus.error', { msg: `Error fetching check IPGateway Status: ${error.message}`, status: false });
         return sendError(res, 500, 'Error fetching check IPGateway status');
     }
 }
@@ -1955,13 +1962,15 @@ export const checkMgmtConfigIP = async (req, res) => {
         const result =await db_connect.collection("dayN_onboarding").findOne(
             {dnacUrl, device, hostname }
         );
-        if(!result) {   
+        console.log("🚀 ~ file: afterOnboardingController.js:400 ~ checkMgmtConfigIP ~ result:", result);
+        
+        if(!result?.newMgmtIp) {   
             return res.status(200).json({ status: false, msg: "No data found" });
         }
-        return res.status(200).json({ status: result.configure_gateway_ip || false, msg: `Earlier Configured gateway Ip ${result.gateway_ip}` });
+        return res.status(200).json({ status: result.newMgmtIp || false, msg: `Earlier Configured Management Ip ${result.newMgmtIp}` });
     } catch (error) {
-        logger.error({ msg: `Error fetching check IPGateway Status: ${error.message}`, status: false });
-        return sendError(res, 500, 'Error fetching check IPGateway status');
+        logDnacError('checkMgmtConfigIP.error', { msg: `Error fetching Mgmt Config Status: ${error.message}`, status: false });
+        return sendError(res, 500, 'Error fetching Management Config status');
     }
 }
 
@@ -1987,7 +1996,7 @@ export const getDayNStatus = async (req, res) => {
                 httpsAgent: new https.Agent({ rejectUnauthorized: false }) // If self-signed
             }
         );
-        logger.info({ msg: 'DNAC getDeviceStatus API call successful', dnacUrl, serialNumber, status: true });
+        logDnacResponse('getDayNStatus', { dnacUrl, device, hostname, serialNumber, response: response.data });
         const responseData = response.data[0];
 
         if (!responseData) {
@@ -2012,7 +2021,7 @@ export const getDayNStatus = async (req, res) => {
             dayZeroErrorMessage: result.dayNresult || null
         })
     } catch (error) {
-        logger.error({ msg: `Error fetching DayN status: ${error.message}`, status: false });
+        logDnacError('getDayNStatus.error', { msg: `Error fetching DayN status: ${error.message}`, status: false });
         return sendError(res, 500, 'Error fetching DayN status');
     }
 }
