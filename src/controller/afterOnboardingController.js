@@ -1518,36 +1518,23 @@ export const getDeviceBySerial = async (req, res) => {
                 ip: device.managementIpAddress,
             };
 
-            const matchingTemplates = await db_connect.collection('ms_compliance_templates').find({
+            const matchingTemplate = await db_connect.collection('ms_compliance_templates').findOne({
                 device_series: { $in: [platformId] },
-                template_name: { $regex: /testing/i },
-                is_mandatory: "true" 
-            }).toArray();
-            if( matchingTemplates.length === 0) {
+                template_name: { $regex: /mandatory/i }            })
+            if( !matchingTemplate) {
                 logDnacResponse('No matching compliance templates found', { platformId, deviceDetails });
                 return res.status(200).json({
                     msg: "No matching compliance templates found for the device",
-                    device: matchingTemplates,
+                    device: matchingTemplate,
                     status: false
                 });
             }
-            logDnacResponse('Matching compliance templates found', { platformId, matchingTemplates });
-            const output = matchingTemplates.map((template) => ({
-                ...template,
-                ...deviceDetails
-            }));
-            if (output.length === 0) {
-                logDnacResponse('No matching compliance templates found for the device', { platformId, deviceDetails });
-                return res.status(200).json({
-                    msg: "Template Data Not Found",
-                    device: output,
-                    status: false
-                });
-            }
-            logDnacResponse('Matching compliance templates found', { platformId, output,serialNumber });
+            logDnacResponse('Matching compliance templates found', { platformId, matchingTemplate });
+            const output = { ...(matchingTemplate || {}), ...(deviceDetails || {}) };
+            logDnacResponse('Matching compliance templates found after merge matchingTemplate', { platformId, output,serialNumber });
             return res.status(200).json({
                 msg: "Device found and compliance templates matched",
-                device: output,
+                device: [output],
                 status: true
             });
         } else {
